@@ -50,7 +50,7 @@ class Workspace:
         self.database_dir = self.root / "database"
         self.db_path = self.database_dir / "herald.db"
 
-    def create(self, competition_dir: str | Path) -> "Workspace":
+    def create(self, competition_dir: str | Path) -> Workspace:
         """创建工作空间目录结构并链接数据。
 
         Args:

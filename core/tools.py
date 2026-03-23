@@ -12,7 +12,6 @@ from typing import Any
 
 from core.database import HeraldDB
 
-
 # ========================
 # Tool 1: query_l2 (未实现)
 # ========================

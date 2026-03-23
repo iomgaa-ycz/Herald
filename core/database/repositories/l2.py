@@ -111,9 +111,7 @@ class L2Repository(BaseRepository):
         )
 
     def get_all_insights(self) -> list[dict]:
-        return self._fetchall(
-            "SELECT * FROM l2_insights ORDER BY updated_at DESC"
-        )
+        return self._fetchall("SELECT * FROM l2_insights ORDER BY updated_at DESC")
 
     def get_evidence(self, insight_id: int) -> list[dict]:
         return self._fetchall(

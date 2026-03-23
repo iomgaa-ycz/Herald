@@ -141,4 +141,3 @@ class HookManager:
             self.dispatch(hook_name, context)
         except Exception:
             logger.exception("Hook 执行失败 [hook=%s]", hook_name)
-

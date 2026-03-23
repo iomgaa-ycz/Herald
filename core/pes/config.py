@@ -8,7 +8,6 @@ from typing import Any
 
 import yaml
 
-
 PHASE_ORDER: tuple[str, str, str] = ("plan", "execute", "summarize")
 
 

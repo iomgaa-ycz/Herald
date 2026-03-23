@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from core.database.repositories.gene import GeneRepository
 from core.database.repositories.base import BaseRepository
+from core.database.repositories.gene import GeneRepository
 
 
 class PopulationQueries(BaseRepository):
@@ -55,9 +55,7 @@ class PopulationQueries(BaseRepository):
         return summary
 
     def get_generation_stats(self) -> list[dict]:
-        return self._fetchall(
-            "SELECT * FROM generation_stats ORDER BY generation ASC"
-        )
+        return self._fetchall("SELECT * FROM generation_stats ORDER BY generation ASC")
 
     def get_slot_history(self, slot: str) -> list[dict]:
         return self._genes.get_slot_history(slot)

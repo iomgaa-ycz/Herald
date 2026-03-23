@@ -265,8 +265,7 @@ class BasePES(ABC):
 
         phase_config = self.config.get_phase(phase)
         serialized_context = {
-            key: self._stringify_prompt_value(value)
-            for key, value in context.items()
+            key: self._stringify_prompt_value(value) for key, value in context.items()
         }
         return phase_config.prompt_template.format_map(
             _SafeFormatDict(serialized_context)
@@ -314,7 +313,9 @@ class BasePES(ABC):
             ),
         )
         self._persist_solution_status(solution)
-        logger.exception("PES phase 失败 [phase=%s, solution_id=%s]", phase, solution.id)
+        logger.exception(
+            "PES phase 失败 [phase=%s, solution_id=%s]", phase, solution.id
+        )
 
     def _persist_solution_created(self, solution: PESSolution) -> None:
         """持久化初始 solution。"""

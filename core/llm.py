@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import inspect
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
@@ -11,7 +11,7 @@ from anthropic import AsyncAnthropic
 @dataclass(slots=True)
 class LLMConfig:
     model: str = "glm-5"
-    max_tokens: int = 32*1024
+    max_tokens: int = 32 * 1024
     max_turns: int = 16
     api_key: str | None = None
 

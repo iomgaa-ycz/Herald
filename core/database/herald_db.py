@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from core.database.connection import DatabaseConnection
 from core.database.queries import LineageQueries, PopulationQueries
@@ -136,7 +136,7 @@ class HeraldDB:
 
     def get_active_solutions(self) -> list[dict]:
         return self.population.get_active_solutions()
-    
+
     def get_population_summary(self) -> dict:
         return self.population.get_population_summary()
 

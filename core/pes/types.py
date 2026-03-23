@@ -57,14 +57,10 @@ class PESSolution:
             "parent_ids": self.parent_ids,
             "fitness": self.fitness,
             "metric_name": (
-                self.metrics.get("metric_name")
-                if self.metrics is not None
-                else None
+                self.metrics.get("metric_name") if self.metrics is not None else None
             ),
             "metric_value": (
-                self.metrics.get("metric_value")
-                if self.metrics is not None
-                else None
+                self.metrics.get("metric_value") if self.metrics is not None else None
             ),
             "metric_direction": (
                 self.metrics.get("metric_direction")
@@ -87,4 +83,3 @@ class PESSolution:
         """转换为 Prompt 可消费的轻量上下文。"""
 
         return _to_plain_data(self)
-

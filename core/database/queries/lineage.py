@@ -46,7 +46,9 @@ class LineageQueries(BaseRepository):
 
         while parent_ids:
             parent_id = parent_ids[0]
-            parent = self._fetchone("SELECT * FROM solutions WHERE id = ?", (parent_id,))
+            parent = self._fetchone(
+                "SELECT * FROM solutions WHERE id = ?", (parent_id,)
+            )
             if parent is None:
                 break
 
