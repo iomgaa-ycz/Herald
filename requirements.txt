@@ -1,0 +1,13 @@
+# Herald2 Dependencies
+
+# LLM
+anthropic>=0.40.0
+
+# Database
+# (sqlite3 is built-in)
+
+# Plugin System
+pluggy>=1.5.0
+
+# Config
+PyYAML>=6.0.2

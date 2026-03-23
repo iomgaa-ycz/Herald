@@ -1,0 +1,26 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+show-fixes = true
+
+[tool.ruff.lint]
+select = [
+  "E",   # 基础错误
+  "F",   # 未定义变量、未使用导入等
+  "I",   # import 排序
+  "B",   # 常见易错写法
+  "UP",  # 更现代的 Python 写法
+  "SIM", # 简化啰嗦代码
+]
+ignore = [
+  "E501", # 行过长交给 formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = true
