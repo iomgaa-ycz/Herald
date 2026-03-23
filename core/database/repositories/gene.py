@@ -9,10 +9,20 @@ from core.database.repositories.base import BaseRepository
 class GeneRepository(BaseRepository):
     """genes 表读写。"""
 
-    def insert_batch(self, solution_id: str, genes: list[dict[str, Any]]) -> None:
+    def insert_batch(
+        self,
+        solution_id: str,
+        genes: dict[str, dict[str, Any]] | list[dict[str, Any]],
+    ) -> None:
         payloads: list[tuple] = []
 
-        for gene in genes:
+        normalized_genes: list[dict[str, Any]]
+        if isinstance(genes, dict):
+            normalized_genes = list(genes.values())
+        else:
+            normalized_genes = genes
+
+        for gene in normalized_genes:
             contract_json = None
             if gene.get("contract") is not None:
                 contract_json = json.dumps(

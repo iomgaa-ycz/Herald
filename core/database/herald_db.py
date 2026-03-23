@@ -135,7 +135,7 @@ class HeraldDB:
         return self.l2.get_evidence(insight_id)
 
     def get_active_solutions(self) -> list[dict]:
-        return self.population.get
+        return self.population.get_active_solutions()
     
     def get_population_summary(self) -> dict:
         return self.population.get_population_summary()
