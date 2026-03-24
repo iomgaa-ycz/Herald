@@ -16,7 +16,7 @@ import yaml
 
 from config.classconfig.herald import HeraldConfig
 from config.classconfig.llm import LLMConfig
-from config.classconfig.pes import PESConfig, PhaseConfig
+from core.pes.config import PESConfig, PhaseConfig
 
 DEFAULT_CONFIG_PATH = "config/herald.yaml"
 
@@ -226,7 +226,7 @@ class Config:
                 if isinstance(phase_data, dict):
                     phases[phase_name] = PhaseConfig(
                         name=phase_name,
-                        prompt_template=phase_data.get("prompt_template", ""),
+                        template_name=phase_data.get("template_name"),
                         tool_names=phase_data.get("tool_names", []),
                         max_retries=phase_data.get("max_retries", 1),
                     )

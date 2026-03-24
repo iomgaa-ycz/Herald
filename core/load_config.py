@@ -1,11 +1,12 @@
 import argparse
+from dataclasses import asdict, fields, is_dataclass
+from typing import Any, TypeVar, Union, get_args, get_origin, get_type_hints
+
 import yaml
-from dataclasses import dataclass, fields, is_dataclass, asdict
-from typing import Any, Dict, Type, TypeVar, Union, get_type_hints, get_origin, get_args
 
 from config.classconfig.herald import HeraldConfig
 from config.classconfig.llm import LLMConfig
-from config.classconfig.pes import PESConfig
+from core.pes.config import PESConfig
 
 T = TypeVar("T")
 
@@ -35,7 +36,7 @@ class ConfigManager:
                     return arg
         return actual_type
 
-    def _get_all_fields(self, cls: Any, prefix="") -> Dict[str, Any]:
+    def _get_all_fields(self, cls: Any, prefix="") -> dict[str, Any]:
         """递归遍历 Dataclass，获取所有叶子节点的配置项。"""
         items = {}
         for field in fields(cls):
@@ -79,7 +80,7 @@ class ConfigManager:
         temp_args, _ = temp_parser.parse_known_args()
 
         if temp_args.config:
-            with open(temp_args.config, 'r', encoding='utf-8') as f:
+            with open(temp_args.config, encoding='utf-8') as f:
                 yaml_data = yaml.safe_load(f)
                 if yaml_data:
                     self._deep_update(final_dict, yaml_data)
@@ -106,7 +107,7 @@ class ConfigManager:
         self.config = self._dict_to_dataclass(HeraldConfig, final_dict)
         return self.config
 
-    def _dict_to_dataclass(self, cls: Type[T], data: Dict[str, Any]) -> T:
+    def _dict_to_dataclass(self, cls: type[T], data: dict[str, Any]) -> T:
         """
         稳健地将字典转换为 Dataclass。
         对于 slots=True 的类，它通过 fields 过滤无效键。

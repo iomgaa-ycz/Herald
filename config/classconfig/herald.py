@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from config.classconfig.llm import LLMConfig
-from config.classconfig.pes import PESConfig
 from config.classconfig.run import RunConfig
+from core.pes.config import PESConfig
 
 
 @dataclass
