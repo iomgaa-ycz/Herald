@@ -52,21 +52,25 @@ python core/main.py [subcommand]
    - **1.3 拟议变更 (Proposed Changes)** — 精确到函数级别，标识 `[NEW]`/`[MODIFY]`/`[DELETE]`
    - **1.4 验证计划 (Verification Plan)** — 怎么确认做对了
 
-3. **等待审核 (Wait)**
+3. **写入计划 (Write Plan)**
+   计划批准后写入 `plans/active/{seq}_{name}.md`（参考 `plans/README.md`）
+
+4. **等待审核 (Wait)**
    - **交互模式（人类操作）**：暂停等待用户审核，未经批准不得编码
-   - **headless 模式（Lead Agent 调度）**：计划已写入文件，Lead Agent 会读取并审核。若审查点简单则直接批准执行，复杂则转交用户确认
+   - **headless 模式（Lead Agent 调度）**：计划已写入 `plans/active/`，Lead Agent 会读取并审核。若审查点简单则直接批准执行，复杂则转交用户确认
 
 ### Phase 2: 执行与验证 (Execution & Verification)
 
-1. **编码** — 按计划（或 `plans/*.md` 中的方案）逐步实现
+1. **编码** — 按 `plans/active/` 中的方案逐步实现
 2. **验证** — 运行测试
    - 失败 → 回到编码修复
    - 成功 → 进入 Phase 3
 
 ### Phase 3: 收尾与交付 (Finalization)
 
-1. **文档同步** — 检查 `docs/` 是否因代码变更而过时，立即更新
-2. **提交** — 按 Conventional Commits 规范提交（由 Lead Agent 执行）
+1. **归档计划** — 将 `plans/active/{plan}.md` 移动到 `plans/completed/`
+2. **文档同步** — 检查 `docs/` 是否因代码变更而过时，立即更新
+3. **提交** — 按 Conventional Commits 规范提交（由 Lead Agent 执行）
 
 ## 4. 核心规则 (Rules)
 
@@ -108,6 +112,9 @@ python core/main.py [subcommand]
 |------|----------|------|
 | 项目目标与背景 | `README.md` | 核心业务逻辑 |
 | 架构与模块设计 | `docs/architecture.md` | 整体架构、三大子系统、集群智能调度 |
+| Harness 工程哲学 | `docs/harness_engineering.md` | 文档规范、计划管理、Agent 协作原则 |
+| 当前执行计划 | `plans/active/` | 正在进行的任务 |
+| 技术债务 | `plans/tech_debt.md` | 已知技术债追踪 |
 
 ## 6. 输出规范
 - 所有输出语言: **简体中文**
