@@ -393,82 +393,81 @@ priority: int = 1               # 未在 TD.md 定义
 
 ---
 
-## 7. Prompt 管理 — 代码内嵌 + 版本化
+## 7. Prompt 管理 — PromptManager V3
 
-### 7.1 基本原则（AI Scientist 法则 7）
+### 7.1 三层架构
 
-**Herald 当前阶段不使用配置文件管理 Prompt**，理由：
-- M0 Prompt 频繁迭代，代码内修改更快
-- 避免"配置地狱"（多个 YAML 文件散落各处）
-- 版本控制友好（Prompt 变更直接在 Git diff 中可见）
+PromptManager V3 采用 **spec + fragments + templates** 三层架构：
 
-### 7.2 组织方式
-
-```python
-# ✅ 优秀示例（pes.py）
-def _build_plan_prompt(self, description_text: str, schema: GenomeSchema) -> str:
-    """构造 Plan 阶段 prompt
-
-    包含：
-    1. 系统角色定义
-    2. 赛题信息
-    3. GenomeSchema 信息
-    4. 输出格式要求（JSON schema）
-    5. 重要提示
-    """
-    # Phase 1: 构造 schema slots 信息
-    slots_info = []
-    for slot in schema.slots:
-        slots_info.append(f"""
-## Slot: {slot.name}
-- **描述**: {slot.description}
-- **接口契约**: `{slot.contract.function_name}(...)` -> {slot.contract.return_type}
-""")
-
-    slots_text = "\n".join(slots_info)
-
-    # Phase 2: 组装完整 prompt
-    prompt = f"""你是 Herald 自动化科研系统的 Planner...
-
-# 赛题信息
-{description_text}
-
-# 基因模板
-{slots_text}
-
-# 输出要求
-...
-"""
-    return prompt
+```
+config/prompts/
+├── prompt_spec.yaml      # 配置规格（定义 required_context, static_fragments, artifacts）
+├── templates/            # Jinja2 模板 (*.j2)
+└── fragments/            # 静态 Prompt 片段 (*.md)
 ```
 
-**关键设计**：
-- 用方法封装 Prompt 构造逻辑（`_build_plan_prompt` / `_build_execute_prompt`）
-- 用 f-string 动态拼接，而非 Jinja2 模板引擎
-- 用注释说明 Prompt 包含的关键部分
-
-### 7.3 多阶段 Prompt 管理
+### 7.2 使用方式
 
 ```python
-# ✅ 按阶段分离方法
-class DraftPES:
-    async def plan(self, solution):
-        prompt = self._build_plan_prompt(...)
-        ...
+from core.prompts import PromptManager
+from pathlib import Path
 
-    async def execute(self, solution):
-        prompt = self._build_execute_prompt_full(...)
-        ...
+# 初始化
+base_dir = Path("config/prompts")
+pm = PromptManager(
+    template_dir=base_dir / "templates",
+    fragments_dir=base_dir / "fragments",
+    spec_path=base_dir / "prompt_spec.yaml",
+)
 
-    async def summarize(self, solution):
-        prompt = self._build_summarize_prompt(...)
-        ...
+# 构建 Prompt
+context = {"solution": "...", "execution_log": "..."}
+prompt = pm.build_prompt("default", "execute", context)
 ```
 
-**M1 演进路径**（未来参考）：
-- 若 Prompt 超过 200 行 → 考虑拆分到 `prompts/plan.txt` 模板文件
-- 若有多语言需求 → 使用 `prompts/{lang}/plan.txt`
-- 仍优先代码内嵌，只在必要时外部化
+### 7.3 配置规格示例
+
+```yaml
+# prompt_spec.yaml
+templates:
+  default_plan:
+    required_context: []
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  default_execute:
+    required_context: ["solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+```
+
+### 7.4 模板示例
+
+```jinja2
+{# templates/default_execute.j2 #}
+{{ static_fragments_text }}
+
+## 当前 Solution
+```
+{{ solution }}
+```
+
+## 任务
+请执行上述 solution...
+```
+
+### 7.5 BasePES 集成
+
+`BasePES` 已内置 PromptManager 支持：
+
+```python
+class BasePES:
+    def __init__(self, prompt_manager: PromptManager | None = None):
+        self.prompt_manager = prompt_manager or self._create_default_prompt_manager()
+
+    def render_prompt(self, phase: str, context: dict) -> str:
+        return self.prompt_manager.build_prompt(self.config.operation, phase, context)
+```
 
 ---
 
