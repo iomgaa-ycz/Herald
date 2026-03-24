@@ -1,0 +1,41 @@
+"""Herald CLI 入口。"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from core.database.herald_db import HeraldDB
+from core.load_config import ConfigManager
+from core.workspace import Workspace
+
+logger = logging.getLogger(__name__)
+
+
+def main() -> None:
+    """Herald 主流程：加载配置 → 创建工作空间 → 初始化数据库。"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    # Phase 1: 获取配置（YAML + CLI）
+    config = ConfigManager().parse()
+    logger.info("配置加载完成: workspace_dir=%s", config.run.workspace_dir)
+
+    # Phase 2: 创建工作空间
+    if not config.run.competition_dir:
+        logger.error("缺少必填参数 --run_competition_dir")
+        sys.exit(1)
+
+    workspace = Workspace(config.run.workspace_dir)
+    workspace.create(config.run.competition_dir)
+    logger.info("工作空间已创建: %s", workspace.root)
+
+    # Phase 3: 初始化数据库
+    HeraldDB(str(workspace.db_path))
+    logger.info("数据库已初始化: %s", workspace.db_path)
+
+
+if __name__ == "__main__":
+    main()
