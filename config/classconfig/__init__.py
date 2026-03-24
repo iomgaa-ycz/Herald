@@ -4,6 +4,7 @@ from config.classconfig.herald import HeraldConfig
 from config.classconfig.llm import LLMConfig
 from config.classconfig.loader import Config, DEFAULT_CONFIG_PATH
 from config.classconfig.pes import PESConfig, PhaseConfig, load_pes_config
+from config.classconfig.run import RunConfig
 
 __all__ = [
     "Config",
@@ -12,5 +13,6 @@ __all__ = [
     "LLMConfig",
     "PESConfig",
     "PhaseConfig",
+    "RunConfig",
     "load_pes_config",
 ]

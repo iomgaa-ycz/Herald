@@ -18,3 +18,8 @@ pes:
   submission_file_name: null
   # phases 配置通常从独立的 PES 配置文件加载
   phases: {}
+
+# 运行时配置
+run:
+  workspace_dir: workspace
+  competition_dir: ""
