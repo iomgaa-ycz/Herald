@@ -11,6 +11,7 @@ select = [
   "B",   # 常见易错写法
   "UP",  # 更现代的 Python 写法
   "SIM", # 简化啰嗦代码
+  "ANN", # 类型注解检查（对应 §3 类型注解规范）
 ]
 ignore = [
   "E501", # 行过长交给 formatter

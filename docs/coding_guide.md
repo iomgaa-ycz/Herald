@@ -613,76 +613,7 @@ class RemoteExecutor(Executor):
 
 ---
 
-## 10. 测试策略 — M0 阶段聚焦集成测试
-
-### 10.1 测试金字塔（当前阶段）
-
-```
-      /\       E2E: 1 个（完整 Draft PES 流程）
-     /  \
-    /集成 \    Integration: 5 个（模块级流程测试）
-   /______\
-  /  单元   \  Unit: 15 个（工具函数 + 契约验证）
- /__________\
-```
-
-**M0 重点**：集成测试 > 单元测试（快速验证核心流程）
-
-### 10.2 测试文件组织
-
-```
-tests/
-├── unit/
-│   ├── test_models.py          # dataclass 序列化/反序列化
-│   ├── test_contract.py        # 契约验证逻辑
-│   └── test_templates.py       # 模板注入/提取
-├── integration/
-│   ├── test_database_flow.py   # 完整 CRUD 流程
-│   ├── test_llm_flow.py        # LLM 调用 + 重试
-│   └── test_pes_flow.py        # Plan → Execute → Summarize
-└── e2e/
-    └── test_draft_pes.py       # 完整 Draft PES（需真实 LLM）
-```
-
-### 10.3 测试输出规范
-
-**所有涉及 LLM/执行的集成测试** 必须生成 Markdown 报告：
-
-```python
-# ✅ 优秀示例
-def test_pes_execute_flow():
-    """测试 Execute 阶段完整流程"""
-    # ... 测试逻辑
-
-    # 生成报告
-    report_path = Path(f"tests/outputs/execute/{test_name}_{timestamp}.md")
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-
-    report_content = f"""
-# Execute 阶段测试报告
-
-## 输入
-- Gene 描述: {gene.description}
-- 契约: {gene.contract}
-
-## 执行过程
-- LLM 输入 Prompt: {prompt[:500]}...
-- LLM 响应: {response.text[:500]}...
-
-## 输出
-- 生成代码: {code}
-- 验证结果: {validation_results}
-- 执行结果: {exec_result}
-
-## 结论
-✓ 测试通过
-"""
-    report_path.write_text(report_content, encoding="utf-8")
-```
-
----
-
-## 11. 配置管理 — dataclass + YAML + .env
+## 10. 配置管理 — dataclass + YAML + .env
 
 ### 11.1 三层优先级
 
@@ -760,7 +691,7 @@ class ExecutionConfig:
 
 ---
 
-## 12. 日志规范 — 结构化 + 分级
+## 11. 日志规范 — 结构化 + 分级
 
 ### 12.1 日志级别定义
 
@@ -805,7 +736,7 @@ logger.debug("Result: %s", result)  # M1 启用
 
 ---
 
-## 13. Herald 当前阶段应学习什么
+## 12. Herald 当前阶段应学习什么
 
 ### 13.1 立即应用的技巧（参考三个项目）
 
@@ -826,7 +757,7 @@ logger.debug("Result: %s", result)  # M1 启用
 
 ---
 
-## 14. 代码审查 Checklist
+## 13. 代码审查 Checklist
 
 ### 14.1 每次 PR 必查
 
@@ -851,7 +782,7 @@ ruff format core/
 
 ---
 
-## 15. 代码清洁法则速查表
+## 14. 代码清洁法则速查表
 
 | 法则 | 原则 | 检测方法 |
 |------|------|---------|
