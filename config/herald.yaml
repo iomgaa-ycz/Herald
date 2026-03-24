@@ -1,0 +1,20 @@
+# Herald 配置文件
+# 所有配置项都可以通过 CLI 参数覆盖
+# CLI 参数格式: --<配置项名> <值> (下划线转为连字符)
+# 例如: --llm-model claude-sonnet-4-20250514
+
+# LLM 配置
+llm:
+  model: glm-5
+  max_tokens: 32768
+  max_turns: 16
+  api_key: null  # 从环境变量 ANTHROPIC_API_KEY 读取
+
+# PES 配置
+pes:
+  name: ""
+  operation: ""
+  solution_file_name: ""
+  submission_file_name: null
+  # phases 配置通常从独立的 PES 配置文件加载
+  phases: {}
