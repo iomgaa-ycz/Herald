@@ -73,9 +73,18 @@ class Workspace:
         return self
 
     def _link_competition_data(self, competition_dir: Path) -> None:
-        """软链接竞赛数据到 data/ 目录。"""
+        """软链接竞赛数据到 data/ 目录。
+
+        优先链接 prepared/public/ 中的内容（mle-bench 格式），
+        若不存在则直接链接根目录（N1eBanG 格式）。
+        """
         src = Path(competition_dir).expanduser().resolve()
-        for item in src.iterdir():
+
+        # 检查是否存在 prepared/public/ 子目录
+        public_dir = src / "prepared" / "public"
+        data_src = public_dir if public_dir.exists() else src
+
+        for item in data_src.iterdir():
             dst = self.data_dir / item.name
             if dst.exists() or dst.is_symlink():
                 dst.unlink()
