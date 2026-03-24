@@ -1,6 +1,6 @@
 """EventBus 核心实现。
 
-基于 pyee 的同步/异步事件总线，支持：
+同步/异步事件总线，支持：
 - 单例模式全局访问
 - 同步和异步事件处理
 - 通配符事件监听
@@ -14,8 +14,6 @@ import logging
 import time
 from collections import deque
 from typing import Any, Callable
-
-from pyee.sync import SyncEventEmitter
 
 from core.events.types import Event
 
@@ -44,16 +42,14 @@ class EventBus:
         self,
         *,
         history_size: int = 100,
-        wildcard: bool = True,
     ) -> None:
         """初始化 EventBus。
 
         Args:
             history_size: 事件历史记录最大条数
-            wildcard: 是否启用通配符监听
         """
-        self._emitter = SyncEventEmitter(wildcard=wildcard, delimiter=":")
         self._history: deque[Event] = deque(maxlen=history_size)
+        self._sync_handlers: dict[str, list[EventHandler]] = {}
         self._async_handlers: dict[str, list[AsyncEventHandler]] = {}
         self._running_tasks: set[asyncio.Task] = set()
 
@@ -69,6 +65,7 @@ class EventBus:
         """重置单例（仅用于测试）。"""
         if cls._instance is not None:
             cls._instance._history.clear()
+            cls._instance._sync_handlers.clear()
             cls._instance._async_handlers.clear()
             cls._instance._running_tasks.clear()
         cls._instance = None
@@ -83,7 +80,9 @@ class EventBus:
         Returns:
             注册的处理函数（可用于链式调用）
         """
-        self._emitter.on(event_type, handler)
+        if event_type not in self._sync_handlers:
+            self._sync_handlers[event_type] = []
+        self._sync_handlers[event_type].append(handler)
         logger.debug("注册事件监听器 [event=%s, handler=%s]", event_type, handler.__name__)
         return handler
 
@@ -107,12 +106,22 @@ class EventBus:
 
     def once(self, event_type: str, handler: EventHandler) -> EventHandler:
         """注册一次性监听器（触发一次后自动移除）。"""
-        self._emitter.once(event_type, handler)
+
+        def wrapper(event: Event) -> None:
+            self.off(event_type, wrapper)  # type: ignore[arg-type]
+            handler(event)
+
+        wrapper.__name__ = handler.__name__
+        self.on(event_type, wrapper)
         return handler
 
     def off(self, event_type: str, handler: EventHandler | AsyncEventHandler) -> None:
         """移除事件监听器。"""
-        self._emitter.remove_listener(event_type, handler)
+        if event_type in self._sync_handlers:
+            try:
+                self._sync_handlers[event_type].remove(handler)  # type: ignore[arg-type]
+            except ValueError:
+                pass
         if event_type in self._async_handlers:
             try:
                 self._async_handlers[event_type].remove(handler)  # type: ignore[arg-type]
@@ -128,14 +137,37 @@ class EventBus:
         # 记录历史
         self._history.append(event)
 
+        # 收集匹配的同步处理器
+        handlers = self._get_matching_handlers(event.type, self._sync_handlers)
+
         # 同步分发
-        try:
-            self._emitter.emit(event.type, event)
-        except Exception:
-            logger.exception("事件处理异常 [event=%s]", event.type)
+        for handler in handlers:
+            try:
+                handler(event)
+            except Exception:
+                logger.exception("事件处理异常 [event=%s, handler=%s]", event.type, handler.__name__)
 
         # 调度异步处理器
         self._schedule_async_handlers(event)
+
+    def _get_matching_handlers(
+        self, event_type: str, handler_map: dict[str, list]
+    ) -> list:
+        """获取匹配事件类型的处理器（支持通配符）。"""
+        handlers = list(handler_map.get(event_type, []))
+
+        # 检查通配符 "*"
+        if "*" in handler_map:
+            handlers.extend(handler_map["*"])
+
+        # 检查前缀通配符 "prefix:*"
+        for pattern, pattern_handlers in handler_map.items():
+            if pattern.endswith(":*"):
+                prefix = pattern[:-1]  # "run:*" -> "run:"
+                if event_type.startswith(prefix):
+                    handlers.extend(pattern_handlers)
+
+        return handlers
 
     def emit_simple(self, event_type: str, **kwargs: Any) -> None:
         """快速分发简单事件。
@@ -149,11 +181,7 @@ class EventBus:
 
     def _schedule_async_handlers(self, event: Event) -> None:
         """调度异步处理器。"""
-        handlers = self._async_handlers.get(event.type, [])
-
-        # 检查通配符匹配
-        if "*" in self._async_handlers:
-            handlers = handlers + self._async_handlers["*"]
+        handlers = self._get_matching_handlers(event.type, self._async_handlers)
 
         for handler in handlers:
             try:
