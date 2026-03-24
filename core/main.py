@@ -6,6 +6,7 @@ import logging
 import sys
 
 from core.database.herald_db import HeraldDB
+from core.events import EventBus
 from core.load_config import ConfigManager
 from core.workspace import Workspace
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Herald 主流程：加载配置 → 创建工作空间 → 初始化数据库。"""
+    """Herald 主流程：加载配置 → 创建工作空间 → 初始化数据库 → 初始化事件流系统。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -35,6 +36,10 @@ def main() -> None:
     # Phase 3: 初始化数据库
     HeraldDB(str(workspace.db_path))
     logger.info("数据库已初始化: %s", workspace.db_path)
+
+    # Phase 4: 初始化事件流系统
+    EventBus.get()
+    logger.info("事件流系统已初始化")
 
 
 if __name__ == "__main__":
