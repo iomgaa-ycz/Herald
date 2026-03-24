@@ -1,4 +1,4 @@
-"""PES 配置类。"""
+"""PES YAML 配置加载。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class PhaseConfig:
     """单个 phase 的配置。"""
 
     name: str
-    prompt_template: str
+    template_name: str | None  # Jinja2 模板文件名（不含 .j2 后缀）
     tool_names: list[str]
     max_retries: int
 
@@ -42,9 +42,8 @@ class PESConfig:
 def _build_phase_config(name: str, payload: dict[str, Any]) -> PhaseConfig:
     """从 YAML 节点构造 PhaseConfig。"""
 
-    prompt_template = str(payload.get("prompt_template", "")).strip()
-    if not prompt_template:
-        raise ValueError(f"phase={name} 缺少 prompt_template")
+    template_name_raw = payload.get("template_name")
+    template_name = str(template_name_raw).strip() if template_name_raw else None
 
     tool_names_raw = payload.get("tool_names", [])
     if not isinstance(tool_names_raw, list):
@@ -56,7 +55,7 @@ def _build_phase_config(name: str, payload: dict[str, Any]) -> PhaseConfig:
 
     return PhaseConfig(
         name=name,
-        prompt_template=prompt_template,
+        template_name=template_name,
         tool_names=[str(item) for item in tool_names_raw],
         max_retries=max_retries,
     )

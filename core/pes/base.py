@@ -8,7 +8,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.pes.config import PESConfig
 from core.pes.hooks import (
@@ -21,14 +21,10 @@ from core.pes.hooks import (
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
 
+if TYPE_CHECKING:
+    from core.prompts.manager import PromptManager
+
 logger = logging.getLogger(__name__)
-
-
-class _SafeFormatDict(dict[str, str]):
-    """缺失 key 时给出清晰错误。"""
-
-    def __missing__(self, key: str) -> str:
-        raise KeyError(f"Prompt 模板缺少上下文字段: {key}")
 
 
 def _normalize_tool_registry(
@@ -75,6 +71,7 @@ class BasePES(ABC):
         tools: dict[str, Any] | list[Any] | None = None,
         hooks: HookManager | None = None,
         runtime_context: dict[str, Any] | None = None,
+        prompt_manager: PromptManager | None = None,
     ) -> None:
         """初始化 PES 基类。"""
 
@@ -85,6 +82,7 @@ class BasePES(ABC):
         self.tools = _normalize_tool_registry(tools)
         self.hooks = hooks or HookManager()
         self.runtime_context = runtime_context or {}
+        self.prompt_manager = prompt_manager or self._create_default_prompt_manager()
 
     async def run(
         self,
@@ -261,14 +259,24 @@ class BasePES(ABC):
         return context
 
     def render_prompt(self, phase: str, context: dict[str, Any]) -> str:
-        """将 YAML 模板渲染为 Prompt。"""
+        """使用 PromptManager 渲染 Prompt。"""
 
-        phase_config = self.config.get_phase(phase)
-        serialized_context = {
-            key: self._stringify_prompt_value(value) for key, value in context.items()
-        }
-        return phase_config.prompt_template.format_map(
-            _SafeFormatDict(serialized_context)
+        return self.prompt_manager.build_prompt(
+            operation=self.config.operation,
+            phase=phase,
+            context=context,
+        )
+
+    def _create_default_prompt_manager(self) -> PromptManager:
+        """创建默认 PromptManager 实例。"""
+
+        from core.prompts.manager import PromptManager
+
+        base_dir = Path(__file__).parent.parent.parent / "config" / "prompts"
+        return PromptManager(
+            template_dir=base_dir / "templates",
+            fragments_dir=base_dir / "fragments",
+            spec_path=base_dir / "prompt_spec.yaml",
         )
 
     async def call_phase_model(self, phase: str, prompt: str) -> Any:
