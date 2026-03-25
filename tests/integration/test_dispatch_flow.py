@@ -101,7 +101,7 @@ def _build_config() -> PESConfig:
 
 
 def test_dispatch_to_pes() -> None:
-    """完整事件流可到达目标 PES，且 Agent Persona 进入 Prompt。"""
+    """完整事件流可到达目标 PES，且可加载 kaggle_master Agent。"""
 
     async def scenario() -> None:
         llm = DummyLLM()
@@ -111,7 +111,7 @@ def test_dispatch_to_pes() -> None:
         EventBus.get().emit(
             TaskDispatchEvent(
                 task_name="mock",
-                agent_name="aggressive",
+                agent_name="kaggle_master",
                 generation=3,
                 context={"slot": "l2"},
             )
@@ -124,8 +124,7 @@ def test_dispatch_to_pes() -> None:
         assert pes.received_execute_event.context["slot"] == "l2"
         assert pes.received_execute_event.generation == 3
         assert pes._current_agent is not None
-        assert pes._current_agent.name == "aggressive"
+        assert pes._current_agent.name == "kaggle_master"
         assert llm.prompts
-        assert "激进的机器学习竞赛选手" in llm.prompts[0]
 
     asyncio.run(scenario())

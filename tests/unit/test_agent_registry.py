@@ -15,10 +15,10 @@ def test_load_returns_complete_profile() -> None:
     """load 返回完整 AgentProfile。"""
 
     registry = AgentRegistry()
-    profile = registry.load("aggressive")
+    profile = registry.load("kaggle_master")
 
-    assert profile.name == "aggressive"
-    assert profile.display_name == "激进探索者"
+    assert profile.name == "kaggle_master"
+    assert profile.display_name == "Kaggle Master"
     assert len(profile.prompt_text) > 0
 
 
@@ -27,4 +27,4 @@ def test_list_all_returns_available_agents() -> None:
 
     registry = AgentRegistry()
 
-    assert registry.list_all() == ["aggressive", "balanced", "conservative"]
+    assert registry.list_all() == ["kaggle_master"]
