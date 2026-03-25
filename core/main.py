@@ -6,7 +6,7 @@ import logging
 import sys
 
 from core.database.herald_db import HeraldDB
-from core.events import EventBus
+from core.events import EventBus, setup_task_dispatcher
 from core.load_config import ConfigManager
 from core.workspace import Workspace
 
@@ -39,6 +39,7 @@ def main() -> None:
 
     # Phase 4: 初始化事件流系统
     EventBus.get()
+    setup_task_dispatcher()
     logger.info("事件流系统已初始化")
 
 

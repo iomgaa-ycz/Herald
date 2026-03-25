@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -10,6 +11,9 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.agent.profile import AgentProfile
+from core.events.bus import EventBus
+from core.events.types import TaskExecuteEvent
 from core.pes.config import PESConfig
 from core.pes.hooks import (
     FailureHookContext,
@@ -18,6 +22,7 @@ from core.pes.hooks import (
     PromptHookContext,
     RunHookContext,
 )
+from core.pes.registry import PESRegistry
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
 
@@ -65,9 +70,9 @@ class BasePES(ABC):
     def __init__(
         self,
         config: PESConfig,
-        llm: Any,
-        db: Any | None = None,
-        workspace: Any | None = None,
+        llm: object,
+        db: object | None = None,
+        workspace: object | None = None,
         tools: dict[str, Any] | list[Any] | None = None,
         hooks: HookManager | None = None,
         runtime_context: dict[str, Any] | None = None,
@@ -83,14 +88,45 @@ class BasePES(ABC):
         self.hooks = hooks or HookManager()
         self.runtime_context = runtime_context or {}
         self.prompt_manager = prompt_manager or self._create_default_prompt_manager()
+        self._current_agent: AgentProfile | None = None
+        self._execution_context: dict[str, Any] = {}
+        self._instance_id = PESRegistry.get_instance().register(self)
+        self.received_execute_event: TaskExecuteEvent | None = None
+        EventBus.get().on(TaskExecuteEvent.EVENT_TYPE, self.on_execute)
+
+    @property
+    def instance_id(self) -> str:
+        """返回当前 PES 实例 ID。"""
+
+        return self._instance_id
+
+    def on_execute(self, event: TaskExecuteEvent) -> None:
+        """接收执行事件并触发运行。"""
+
+        if event.target_pes_id != self.instance_id:
+            return
+        if event.agent is None:
+            raise ValueError("TaskExecuteEvent.agent 不能为空")
+
+        self.received_execute_event = event
+        self._current_agent = event.agent
+        self._execution_context = dict(event.context)
+        asyncio.create_task(
+            self.run(
+                agent_profile=event.agent,
+                generation=event.generation,
+            )
+        )
 
     async def run(
         self,
+        agent_profile: AgentProfile,
         generation: int = 0,
         parent_solution: PESSolution | None = None,
     ) -> PESSolution:
         """执行完整 PES 三阶段流程。"""
 
+        self._current_agent = agent_profile
         solution = self.create_solution(
             generation=generation,
             parent_solution=parent_solution,
@@ -108,7 +144,10 @@ class BasePES(ABC):
 
         try:
             solution = await self.plan(solution, parent_solution=parent_solution)
-            solution = await self.execute(solution, parent_solution=parent_solution)
+            solution = await self.execute_phase(
+                solution,
+                parent_solution=parent_solution,
+            )
             if solution.status != "failed":
                 solution = await self.summarize(
                     solution,
@@ -135,7 +174,7 @@ class BasePES(ABC):
 
         return await self._run_phase("plan", solution, parent_solution)
 
-    async def execute(
+    async def execute_phase(
         self,
         solution: PESSolution,
         parent_solution: PESSolution | None = None,
@@ -248,10 +287,15 @@ class BasePES(ABC):
         """构造通用 Prompt 上下文。"""
 
         context: dict[str, Any] = dict(self.runtime_context)
+        context.update(self._execution_context)
         context["phase"] = phase
         context["solution"] = solution.to_prompt_payload()
         context["operation"] = self.config.operation
         context["pes_name"] = self.config.name
+        if self._current_agent is not None:
+            context["agent"] = self._current_agent.to_prompt_payload()
+        if "execute" in solution.phase_outputs:
+            context["execution_log"] = solution.phase_outputs["execute"]
         if parent_solution is not None:
             context["parent_solution"] = parent_solution.to_prompt_payload()
         if self.workspace is not None and hasattr(self.workspace, "summary"):
@@ -279,7 +323,7 @@ class BasePES(ABC):
             spec_path=base_dir / "prompt_spec.yaml",
         )
 
-    async def call_phase_model(self, phase: str, prompt: str) -> Any:
+    async def call_phase_model(self, phase: str, prompt: str) -> object:
         """按 phase 配置调用模型。"""
 
         phase_config = self.config.get_phase(phase)
@@ -366,7 +410,7 @@ class BasePES(ABC):
         solution: PESSolution,
         phase: str,
         prompt: str,
-        response: Any,
+        response: object,
     ) -> None:
         """记录 LLM 调用。"""
 
@@ -385,7 +429,7 @@ class BasePES(ABC):
             cost_usd=getattr(response, "cost_usd", None),
         )
 
-    def _stringify_prompt_value(self, value: Any) -> str:
+    def _stringify_prompt_value(self, value: object) -> str:
         """将上下文字段转为 Prompt 中可展示的字符串。"""
 
         if is_dataclass(value):
@@ -401,7 +445,7 @@ class BasePES(ABC):
         self,
         phase: str,
         solution: PESSolution,
-        response: Any,
+        response: object,
         parent_solution: PESSolution | None,
     ) -> dict[str, Any]:
         """消费 phase 响应并更新 solution。"""
