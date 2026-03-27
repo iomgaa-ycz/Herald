@@ -1,0 +1,110 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `draft_execute` phase，需要把描述态方案实现为完整可运行代码。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 角色边界
+
+- `agent` 负责执行风格与调试策略。
+- `task_spec`、`solution`、`workspace` 才是本轮实现的硬约束。
+- 不要把 Agent 提示重写成新的任务目标；若与当前方案冲突，以当前任务上下文为准。
+
+{% if task_spec %}
+# 任务规格
+
+- `task_type`: `{{ task_spec.task_type }}`
+- `competition_name`: `{{ task_spec.competition_name }}`
+- `objective`: `{{ task_spec.objective }}`
+- `metric_name`: `{{ task_spec.metric_name }}`
+- `metric_direction`: `{{ task_spec.metric_direction }}`
+{% endif %}
+
+{% if workspace %}
+# 工作空间
+
+- `workspace_root`: `{{ workspace.workspace_root }}`
+- `data_dir`: `{{ workspace.data_dir }}`
+- `working_dir`: `{{ workspace.working_dir }}`
+- `logs_dir`: `{{ workspace.logs_dir }}`
+- `db_path`: `{{ workspace.db_path }}`
+{% else %}
+# 工作空间
+
+- 未提供 `workspace`，请在当前工作目录完成实现，并自行保持文件结构清晰。
+{% endif %}
+
+{% if recent_error %}
+# 最近错误
+
+{{ recent_error }}
+{% endif %}
+
+{% if solution.plan_summary %}
+# 当前方案的 Plan 摘要
+
+{{ solution.plan_summary }}
+{% endif %}
+
+{% if solution.genes %}
+# 当前方案的 Gene 描述
+
+{% for slot_name, gene in solution.genes.items() %}
+## Slot `{{ slot_name }}`
+
+{{ gene }}
+
+{% endfor %}
+{% else %}
+# 当前方案的 Gene 描述
+
+- 当前 `solution.genes` 为空，请根据 plan 摘要与任务规格完成最小可运行实现。
+{% endif %}
+
+{% if template_content %}
+# 模板骨架
+
+```python
+{{ template_content }}
+```
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 执行要求
+
+- 把描述态方案真正实现为完整、可运行、可验证的代码，不要只输出伪代码或待办列表。
+- 先保证 MVP baseline 跑通，再做必要优化；避免过度工程化。
+- 所有实现必须围绕锁定指标展开，优先服务于 `metric_name` / `metric_direction`。
+- 若存在最近错误，先定位并解除阻塞，再继续推进剩余实现。
+- 优先在 `working_dir` 中完成实现与调试；生成的工件应与当前工作空间结构兼容。
+- 若 gene 描述与 plan 摘要存在不一致，以更具体、更新的方案为准，并在最终总结中说明取舍。
+- 可以使用当前 phase 提供的工具，但不要修改与本任务无关的全局基础设施。
+
+# 交付要求
+
+请在完成实现后，给出一份简短执行总结，至少包含：
+- 实际实现了什么
+- 是否成功跑通
+- 仍然存在的风险或待验证点

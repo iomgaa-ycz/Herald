@@ -1,0 +1,131 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `draft_plan` phase，需要从零生成完整方案的描述态。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 角色边界
+
+- `agent` 决定执行风格、表达偏好与问题拆解方式。
+- `task_spec`、`schema`、`solution` 决定任务目标、slot 边界与当前方案状态。
+- 不要把 Agent 人格提示误当成任务规格；若二者冲突，以 `task_spec` / `schema` 为准。
+
+{% if task_spec %}
+# 任务规格
+
+- `task_type`: `{{ task_spec.task_type }}`
+- `competition_name`: `{{ task_spec.competition_name }}`
+- `objective`: `{{ task_spec.objective }}`
+- `metric_name`: `{{ task_spec.metric_name }}`
+- `metric_direction`: `{{ task_spec.metric_direction }}`
+{% else %}
+# 任务规格
+
+- 未提供 `task_spec`，请基于其余上下文做最小可行假设，不要因此停滞。
+{% endif %}
+
+{% if schema %}
+# Genome Schema
+
+{% if schema.task_type %}
+- `schema.task_type`: `{{ schema.task_type }}`
+{% endif %}
+
+{% if schema.slots %}
+{% for slot_name, slot_contract in schema.slots.items() %}
+## Slot `{{ slot_name }}`
+
+{% if slot_contract %}
+- `function_name`: `{{ slot_contract.function_name }}`
+- `return_type`: `{{ slot_contract.return_type }}`
+{% if slot_contract.params %}
+- `params`:
+{% for param in slot_contract.params %}
+  - `{{ param.name or param["name"] }}`: `{{ param.type or param["type"] }}`
+{% endfor %}
+{% else %}
+- `params`: 无
+{% endif %}
+{% else %}
+- 当前 slot 仅定义名称，尚未提供严格契约；请给出最小可实现方案。
+{% endif %}
+
+{% endfor %}
+{% else %}
+- `schema` 已提供，但 `slots` 为空；请先抽象所需 slot 再输出描述态方案。
+{% endif %}
+{% else %}
+# Genome Schema
+
+- 未提供 `schema`，请先抽象出完成任务所需的核心 slot，再给出每个 slot 的描述态方案。
+{% endif %}
+
+{% if parent_solution %}
+# 父方案参考
+
+- `solution_id`: `{{ parent_solution.id }}`
+- `status`: `{{ parent_solution.status }}`
+{% if parent_solution.plan_summary %}
+## 父方案 Plan 摘要
+
+{{ parent_solution.plan_summary }}
+{% endif %}
+{% if parent_solution.execute_summary %}
+## 父方案 Execute 摘要
+
+{{ parent_solution.execute_summary }}
+{% endif %}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 任务要求
+
+- 为所有 slot 生成“描述态方案”，不要直接输出完整代码实现。
+- 优先给出可运行、可验证、可在下一阶段直接落地的 MVP 方案。
+- 如果外部说明文档、补充材料或某些工件不存在，不要阻塞；基于现有上下文做最小必要假设，并把假设写明。
+- 若存在父方案，先判断哪些 slot 应复用、哪些 slot 应重写，并说明原因。
+- 方案必须围绕锁定指标展开，避免与 `metric_name` / `metric_direction` 无关的设计。
+
+# 输出格式
+
+请严格按以下结构输出：
+
+## 总体策略
+- 1-3 段，说明整体建模/执行思路
+
+## 关键假设
+- 列出缺失信息下采用的最小假设
+
+## 主要风险
+- 列出最可能影响后续 execute 的风险
+
+## Slot 方案
+对每个 slot 单独输出一个小节，至少包含：
+- 目标
+- 核心思路
+- 预期输入/输出
+- 与其他 slot 的依赖关系
+- 验证方式
+- 是否复用父方案，以及理由
