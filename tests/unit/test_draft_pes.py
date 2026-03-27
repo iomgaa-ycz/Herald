@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.agent.profile import AgentProfile
 from core.events.bus import EventBus
 from core.pes.base import BasePES
 from core.pes.config import PESConfig, PhaseConfig, load_pes_config
@@ -13,6 +14,7 @@ from core.pes.draft import DraftPES
 from core.pes.registry import PESRegistry
 from core.pes.schema import GenomeSchema, SlotContract, TaskSpec
 from core.pes.types import PESSolution
+from core.prompts.manager import PromptManager
 
 
 def setup_function() -> None:
@@ -70,14 +72,20 @@ class DummyPromptManager:
 class DummyWorkspace:
     """最小工作空间测试桩。"""
 
+    root: Path
+    data_dir: Path
     working_dir: Path
+    logs_dir: Path
     db_path: Path
 
     def summary(self) -> dict[str, str]:
         """返回最小工作空间摘要。"""
 
         return {
+            "workspace_root": str(self.root),
+            "data_dir": str(self.data_dir),
             "working_dir": str(self.working_dir),
+            "logs_dir": str(self.logs_dir),
             "db_path": str(self.db_path),
         }
 
@@ -152,6 +160,67 @@ def _build_config(name: str = "draft") -> PESConfig:
     )
 
 
+def _build_prompt_manager() -> PromptManager:
+    """构造指向仓库配置目录的真实 PromptManager。"""
+
+    base_dir = Path(__file__).resolve().parents[2] / "config" / "prompts"
+    return PromptManager(
+        template_dir=base_dir / "templates",
+        fragments_dir=base_dir / "fragments",
+        spec_path=base_dir / "prompt_spec.yaml",
+    )
+
+
+def _build_runtime_context() -> dict[str, object]:
+    """构造 DraftPES 运行所需的最小上下文。"""
+
+    return {
+        "task_spec": {
+            "task_type": "tabular_ml",
+            "competition_name": "demo",
+            "objective": "maximize accuracy",
+            "metric_name": "accuracy",
+            "metric_direction": "max",
+        },
+        "schema": {
+            "task_type": "tabular_ml",
+            "slots": {
+                "MODEL": {
+                    "function_name": "build_model",
+                    "params": [
+                        {"name": "features", "type": "DataFrame"},
+                    ],
+                    "return_type": "Model",
+                }
+            },
+        },
+        "recent_error": "",
+        "template_content": "",
+    }
+
+
+def _build_workspace(tmp_path: Path) -> DummyWorkspace:
+    """构造带真实目录的测试工作空间。"""
+
+    root = tmp_path / "workspace"
+    data_dir = root / "data"
+    working_dir = root / "working"
+    logs_dir = root / "logs"
+    db_path = root / "database" / "herald.db"
+
+    for path in (data_dir, working_dir, logs_dir, db_path.parent):
+        path.mkdir(parents=True, exist_ok=True)
+    db_path.touch(exist_ok=True)
+
+    return DummyWorkspace(
+        root=root,
+        data_dir=data_dir,
+        working_dir=working_dir,
+        logs_dir=logs_dir,
+        db_path=db_path,
+    )
+
+
 def test_schema_types_can_be_constructed() -> None:
     """最小 schema 可正常构造。"""
 
@@ -220,7 +289,10 @@ def test_draft_pes_builds_execute_model_options_from_workspace() -> None:
     """`DraftPES` 能从 workspace 构造 execute phase 参数。"""
 
     workspace = DummyWorkspace(
+        root=Path("/tmp/herald"),
+        data_dir=Path("/tmp/herald/data"),
         working_dir=Path("/tmp/herald-working"),
+        logs_dir=Path("/tmp/herald/logs"),
         db_path=Path("/tmp/herald.db"),
     )
     pes = DraftPES(
@@ -237,8 +309,8 @@ def test_draft_pes_builds_execute_model_options_from_workspace() -> None:
     assert model_options["env"] == {"HERALD_DB_PATH": "/tmp/herald.db"}
 
 
-def test_draft_pes_handle_phase_response_is_explicit_placeholder() -> None:
-    """`DraftPES` 当前应显式提示业务逻辑待实现。"""
+def test_draft_pes_handle_phase_response_updates_solution() -> None:
+    """`DraftPES` 能以最小方式更新 phase 结果。"""
 
     pes = DraftPES(
         config=_build_config(),
@@ -246,17 +318,55 @@ def test_draft_pes_handle_phase_response_is_explicit_placeholder() -> None:
         prompt_manager=DummyPromptManager(),
     )
     solution = pes.create_solution(generation=0)
-
-    try:
-        asyncio.run(
-            pes.handle_phase_response(
-                phase="plan",
-                solution=solution,
-                response=DummyResponse(result="ok", turns=[]),
-                parent_solution=None,
-            )
+    result = asyncio.run(
+        pes.handle_phase_response(
+            phase="plan",
+            solution=solution,
+            response=DummyResponse(result="ok", turns=[]),
+            parent_solution=None,
         )
-    except NotImplementedError as error:
-        assert "待下一轮实现" in str(error)
-    else:
-        raise AssertionError("预期 DraftPES.handle_phase_response 抛出 NotImplementedError")
+    )
+
+    assert result["phase"] == "plan"
+    assert solution.plan_summary == "ok"
+
+
+def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
+    """`DraftPES` 能结合真实 PromptManager 走完三阶段。"""
+
+    llm = DummyLLM()
+    workspace = _build_workspace(tmp_path)
+    pes = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=llm,
+        workspace=workspace,
+        runtime_context=_build_runtime_context(),
+        prompt_manager=_build_prompt_manager(),
+    )
+
+    solution = asyncio.run(
+        pes.run(
+            agent_profile=AgentProfile(
+                name="draft-agent",
+                display_name="Draft Agent",
+                prompt_text="",
+            ),
+            generation=0,
+        )
+    )
+
+    assert solution.status == "completed"
+    assert solution.plan_summary == "ok"
+    assert solution.execute_summary == "ok"
+    assert solution.summarize_insight == "ok"
+    assert set(solution.phase_outputs.keys()) == {"plan", "execute", "summarize"}
+    assert solution.solution_file_path == str(workspace.working_dir / "solution.py")
+    assert solution.submission_file_path == str(
+        workspace.working_dir / "submission.csv"
+    )
+    assert len(llm.calls) == 3
+    assert "draft_plan" in str(llm.calls[0]["prompt"])
+    assert "draft_execute" in str(llm.calls[1]["prompt"])
+    assert "draft_summarize" in str(llm.calls[2]["prompt"])
+    assert llm.calls[1]["cwd"] == str(workspace.working_dir)
+    assert llm.calls[1]["env"] == {"HERALD_DB_PATH": str(workspace.db_path)}

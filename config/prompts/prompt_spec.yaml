@@ -2,20 +2,21 @@
 # 定义各操作/阶段的 Prompt 模板规格
 
 templates:
-  # 默认操作 - Plan 阶段
-  default_plan:
-    required_context: []
-    static_fragments: ["system_context"]
-    artifacts: []
 
-  # 默认操作 - Execute 阶段
-  default_execute:
+  # Draft 操作 - Plan 阶段
+  draft_plan:
     required_context: ["solution"]
     static_fragments: ["system_context"]
     artifacts: []
 
-  # 默认操作 - Summarize 阶段
-  default_summarize:
+  # Draft 操作 - Execute 阶段
+  draft_execute:
+    required_context: ["solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  # Draft 操作 - Summarize 阶段
+  draft_summarize:
     required_context: ["solution", "execution_log"]
     static_fragments: ["system_context"]
     artifacts: []
