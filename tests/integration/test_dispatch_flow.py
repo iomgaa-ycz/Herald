@@ -17,10 +17,18 @@ from core.pes.types import PESSolution
 class DummyResponse:
     """测试用模型响应。"""
 
-    text: str
+    result: str
+    turns: list = None  # type: ignore[assignment]
     model: str = "dummy-model"
     tokens_in: int = 1
     tokens_out: int = 1
+    cost_usd: float | None = None
+    duration_ms: int = 0
+    session_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.turns is None:
+            self.turns = []
 
 
 class DummyLLM:
@@ -31,11 +39,15 @@ class DummyLLM:
 
         self.prompts: list[str] = []
 
-    async def call(self, prompt: str) -> DummyResponse:
+    async def execute_task(
+        self,
+        prompt: str,
+        **kwargs: object,
+    ) -> DummyResponse:
         """记录 Prompt 并返回固定响应。"""
 
         self.prompts.append(prompt)
-        return DummyResponse(text="ok")
+        return DummyResponse(result="ok")
 
 
 class MockPES(BasePES):
@@ -52,11 +64,11 @@ class MockPES(BasePES):
 
         del parent_solution
         if phase == "plan":
-            solution.plan_summary = response.text
+            solution.plan_summary = response.result
         elif phase == "execute":
-            solution.execute_summary = response.text
+            solution.execute_summary = response.result
         elif phase == "summarize":
-            solution.summarize_insight = response.text
+            solution.summarize_insight = response.result
             solution.status = "completed"
         return {"phase": phase}
 
@@ -83,18 +95,24 @@ def _build_config() -> PESConfig:
                 template_name="default_plan",
                 tool_names=[],
                 max_retries=1,
+                allowed_tools=[],
+                max_turns=1,
             ),
             "execute": PhaseConfig(
                 name="execute",
                 template_name="default_execute",
                 tool_names=[],
                 max_retries=1,
+                allowed_tools=[],
+                max_turns=1,
             ),
             "summarize": PhaseConfig(
                 name="summarize",
                 template_name="default_summarize",
                 tool_names=[],
                 max_retries=1,
+                allowed_tools=[],
+                max_turns=1,
             ),
         },
     )

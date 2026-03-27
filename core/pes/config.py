@@ -19,6 +19,8 @@ class PhaseConfig:
     template_name: str | None  # Jinja2 模板文件名（不含 .j2 后缀）
     tool_names: list[str]
     max_retries: int
+    allowed_tools: list[str] | None = None  # 该 phase 允许的内置 Agent 工具
+    max_turns: int = 1  # 该 phase 最大 Agent 轮次
 
 
 @dataclass(slots=True)
@@ -53,11 +55,24 @@ def _build_phase_config(name: str, payload: dict[str, Any]) -> PhaseConfig:
     if max_retries < 1:
         raise ValueError(f"phase={name} 的 max_retries 必须 >= 1")
 
+    allowed_tools_raw = payload.get("allowed_tools")
+    allowed_tools: list[str] | None = None
+    if allowed_tools_raw is not None:
+        if not isinstance(allowed_tools_raw, list):
+            raise ValueError(f"phase={name} 的 allowed_tools 必须为列表")
+        allowed_tools = [str(item) for item in allowed_tools_raw]
+
+    max_turns = int(payload.get("max_turns", 1))
+    if max_turns < 1:
+        raise ValueError(f"phase={name} 的 max_turns 必须 >= 1")
+
     return PhaseConfig(
         name=name,
         template_name=template_name,
         tool_names=[str(item) for item in tool_names_raw],
         max_retries=max_retries,
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
     )
 
 

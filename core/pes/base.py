@@ -263,9 +263,9 @@ class BasePES(ABC):
                 response=response,
                 parent_solution=parent_solution,
             )
-            solution.phase_outputs[phase] = response.text
+            solution.phase_outputs[phase] = response.result
             phase_context.prompt = prompt_hook_context.prompt
-            phase_context.response_text = response.text
+            phase_context.response_text = response.result
             phase_context.parsed_output = parsed_output
             self.hooks.dispatch("after_phase", phase_context)
             self._persist_solution_status(solution)
@@ -328,16 +328,14 @@ class BasePES(ABC):
 
         phase_config = self.config.get_phase(phase)
         last_error: Exception | None = None
-        visible_tools = _filter_tools_by_names(self.tools, phase_config.tool_names)
 
         for _ in range(phase_config.max_retries):
             try:
-                if visible_tools:
-                    return await self.llm.call_with_tools(
-                        prompt=prompt,
-                        tools=visible_tools,
-                    )
-                return await self.llm.call(prompt)
+                return await self.llm.execute_task(
+                    prompt=prompt,
+                    max_turns=phase_config.max_turns,
+                    allowed_tools=phase_config.allowed_tools or None,
+                )
             except Exception as error:
                 last_error = error
 
@@ -422,10 +420,10 @@ class BasePES(ABC):
             purpose=f"{self.config.operation}_{phase}",
             model=getattr(response, "model", None),
             input_messages=[{"role": "user", "content": prompt}],
-            output_text=getattr(response, "text", None),
+            output_text=getattr(response, "result", None),
             tokens_in=getattr(response, "tokens_in", None),
             tokens_out=getattr(response, "tokens_out", None),
-            latency_ms=getattr(response, "latency_ms", None),
+            latency_ms=getattr(response, "duration_ms", None),
             cost_usd=getattr(response, "cost_usd", None),
         )
 

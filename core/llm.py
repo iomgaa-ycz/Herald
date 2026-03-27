@@ -1,134 +1,148 @@
+"""基于 Claude Agent SDK 的 LLM 客户端。"""
+
 from __future__ import annotations
 
-import re
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    query,
+)
 
 
 @dataclass(slots=True)
 class LLMConfig:
+    """LLM 配置。"""
+
     model: str = "glm-5"
     max_tokens: int = 32 * 1024
     max_turns: int = 16
-    api_key: str | None = None
+    permission_mode: str = "bypassPermissions"
 
 
 @dataclass(slots=True)
 class LLMResponse:
-    text: str
-    code_block: str | None
-    model: str
+    """Agent SDK 统一响应。"""
+
+    result: str
+    turns: list[dict[str, Any]]
+    model: str | None
     tokens_in: int
     tokens_out: int
-
-
-ToolFn = Callable[..., Any] | Callable[..., Awaitable[Any]]
+    cost_usd: float | None
+    duration_ms: int
+    session_id: str | None
 
 
 class LLMClient:
-    """
-    精简版 Claude 多轮工具调用客户端：
-    - 仅保留多轮 Agent 调用
-    - 基于 Anthropic Python SDK tool_runner
-    - tools 直接传 Python 函数即可
-    """
+    """基于 Claude Agent SDK query() 的统一客户端。"""
 
     def __init__(self, config: LLMConfig | None = None) -> None:
-        self.config = config or LLMConfig()
-        self.client = AsyncAnthropic(api_key=self.config.api_key)
+        """初始化客户端。"""
 
-    async def call_with_tools(
+        self.config = config or LLMConfig()
+
+    def _build_options(
+        self,
+        *,
+        system_prompt: str | None = None,
+        max_turns: int | None = None,
+        allowed_tools: list[str] | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> ClaudeAgentOptions:
+        """构造 ClaudeAgentOptions。"""
+
+        return ClaudeAgentOptions(
+            model=self.config.model,
+            system_prompt=system_prompt,
+            max_turns=max_turns or self.config.max_turns,
+            allowed_tools=allowed_tools or [],
+            permission_mode=self.config.permission_mode,
+            cwd=cwd,
+            env=env or {},
+            mcp_servers=mcp_servers or {},
+            setting_sources=["user", "project", "local"],
+        )
+
+    async def execute_task(
         self,
         prompt: str,
-        tools: list[ToolFn],
+        *,
         system_prompt: str | None = None,
+        max_turns: int | None = None,
+        allowed_tools: list[str] | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> LLMResponse:
-        if not tools:
-            raise ValueError("tools 不能为空，当前版本仅支持带工具的多轮调用")
+        """执行 Agent 任务。
 
-        runner = self.client.beta.messages.tool_runner(
-            model=self.config.model,
-            max_tokens=self.config.max_tokens,
-            tools=tools,
-            system=system_prompt if system_prompt else None,
-            messages=[{"role": "user", "content": prompt}],
+        Args:
+            prompt: 用户提示词
+            system_prompt: 系统提示词
+            max_turns: 最大轮次
+            allowed_tools: 允许的内置 Agent 工具列表
+            mcp_servers: MCP 服务器配置
+            cwd: 工作目录
+            env: 环境变量
+        """
+
+        options = self._build_options(
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            allowed_tools=allowed_tools,
+            mcp_servers=mcp_servers,
+            cwd=cwd,
+            env=env,
         )
 
-        final_message = None
-        turn_count = 0
+        turns: list[dict[str, Any]] = []
+        pending_tool_calls: dict[str, dict[str, Any]] = {}
 
-        async for message in runner:
-            final_message = message
-            turn_count += 1
-            if turn_count >= self.config.max_turns:
-                break
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                turn: dict[str, Any] = {
+                    "role": "assistant",
+                    "text": "",
+                    "tool_calls": [],
+                }
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        turn["text"] += block.text
+                    elif isinstance(block, ToolUseBlock):
+                        tc: dict[str, Any] = {
+                            "name": block.name,
+                            "input": block.input,
+                            "result": None,
+                        }
+                        turn["tool_calls"].append(tc)
+                        pending_tool_calls[block.id] = tc
+                    elif isinstance(block, ToolResultBlock):
+                        target = pending_tool_calls.get(block.tool_use_id)
+                        if target is not None:
+                            target["result"] = block.content
+                if turn["text"] or turn["tool_calls"]:
+                    turns.append(turn)
 
-        if final_message is None:
-            raise RuntimeError("未收到模型返回结果")
+            elif isinstance(message, ResultMessage):
+                usage = message.usage or {}
+                return LLMResponse(
+                    result=message.result or "",
+                    turns=turns,
+                    model=self.config.model,
+                    tokens_in=usage.get("input_tokens", 0),
+                    tokens_out=usage.get("output_tokens", 0),
+                    cost_usd=message.total_cost_usd,
+                    duration_ms=message.duration_ms,
+                    session_id=message.session_id,
+                )
 
-        text = self._extract_text(final_message)
-        usage = getattr(final_message, "usage", None)
-
-        return LLMResponse(
-            text=text,
-            code_block=self.extract_code_block(text),
-            model=self.config.model,
-            tokens_in=getattr(usage, "input_tokens", 0) or 0,
-            tokens_out=getattr(usage, "output_tokens", 0) or 0,
-        )
-
-    @staticmethod
-    def _extract_text(message: Any) -> str:
-        """
-        从 Anthropic message.content 中提取最终文本。
-        """
-        parts: list[str] = []
-
-        for block in getattr(message, "content", []) or []:
-            if getattr(block, "type", None) == "text":
-                text = getattr(block, "text", None)
-                if text:
-                    parts.append(text)
-
-        return "\n".join(parts).strip()
-
-    @staticmethod
-    def extract_code_block(text: str) -> str | None:
-        pattern = r"```(?:python|py)\s*\n(.*?)```"
-        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
-        return max(matches, key=len).strip() if matches else None
-
-
-# ----------------------------
-# 示例：定义工具
-# ----------------------------
-
-# async def get_weather(location: str) -> str:
-#     return f"{location}：晴，26°C"
-
-
-# def add(a: int, b: int) -> int:
-#     return a + b
-
-
-# ----------------------------
-# 示例：调用
-# ----------------------------
-
-# import asyncio
-#
-# async def main():
-#     client = LLMClient()
-#     resp = await client.call_with_tools(
-#         prompt="先调用天气工具查询上海天气，再计算 23 + 19，最后用中文总结。",
-#         tools=[get_weather, add],
-#         system_prompt="你是一个会主动调用工具的助手。",
-#     )
-#     print(resp.text)
-#     print(resp.code_block)
-#     print(resp.tokens_in, resp.tokens_out)
-#
-# asyncio.run(main())
+        raise RuntimeError("未收到 ResultMessage")

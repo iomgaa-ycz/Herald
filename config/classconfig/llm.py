@@ -12,4 +12,4 @@ class LLMConfig:
     model: str = "glm-5"
     max_tokens: int = 32 * 1024
     max_turns: int = 16
-    api_key: str | None = None
+    permission_mode: str = "bypassPermissions"
