@@ -216,6 +216,22 @@ class BasePES(ABC):
             run_id=self.runtime_context.get("run_id"),
         )
 
+    def build_phase_model_options(
+        self,
+        phase: str,
+        solution: PESSolution,
+        parent_solution: PESSolution | None,
+    ) -> dict[str, Any]:
+        """构造 phase 级模型调用参数。
+
+        当前仅约定两个可选字段：
+        - `cwd`
+        - `env`
+        """
+
+        del phase, solution, parent_solution
+        return {}
+
     async def _run_phase(
         self,
         phase: str,
@@ -237,6 +253,11 @@ class BasePES(ABC):
                 solution=solution,
                 parent_solution=parent_solution,
             )
+            model_options = self.build_phase_model_options(
+                phase=phase,
+                solution=solution,
+                parent_solution=parent_solution,
+            )
             prompt_context["allowed_tools"] = self.config.get_phase(phase).tool_names
             prompt = self.render_prompt(phase, prompt_context)
             prompt_hook_context = PromptHookContext(
@@ -250,6 +271,8 @@ class BasePES(ABC):
             response = await self.call_phase_model(
                 phase=phase,
                 prompt=prompt_hook_context.prompt,
+                cwd=model_options.get("cwd"),
+                env=model_options.get("env"),
             )
             self._log_llm_call(
                 solution=solution,
@@ -323,7 +346,13 @@ class BasePES(ABC):
             spec_path=base_dir / "prompt_spec.yaml",
         )
 
-    async def call_phase_model(self, phase: str, prompt: str) -> object:
+    async def call_phase_model(
+        self,
+        phase: str,
+        prompt: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> object:
         """按 phase 配置调用模型。"""
 
         phase_config = self.config.get_phase(phase)
@@ -335,6 +364,8 @@ class BasePES(ABC):
                     prompt=prompt,
                     max_turns=phase_config.max_turns,
                     allowed_tools=phase_config.allowed_tools or None,
+                    cwd=cwd,
+                    env=env,
                 )
             except Exception as error:
                 last_error = error

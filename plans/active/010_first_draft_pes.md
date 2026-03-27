@@ -1,186 +1,158 @@
-# 008: 构建首个 DraftPES
+# 010: DraftPES 接口定型
 
 ## 元信息
 - 状态: draft
 - 创建: 2026-03-25
-- 更新: 2026-03-25
+- 更新: 2026-03-27
 - 负责人: Codex
 
 ## 1.1 摘要
 
-基于当前仓库已具备的 `BasePES`、`PESConfig`、`PromptManager`、`HookManager`、`Workspace`、`HeraldDB` 骨架，落地第一个真实可跑的 `DraftPES`。本次目标是在 Herald2 现有抽象下打通 `draft -> plan/execute/summarize` 主链路，使用占位 `draft_*.j2` 保证可测试可运行，同时接入真实多轮 agent coding 与真实竞赛执行能力；若执行中发现必须扩展 `BasePES` 通用能力，将单独报告后再动。
+本轮不追求 `DraftPES.run()` 可跑通，也不接入正式 Prompt。目标只收敛 4 个接口面：`BasePES` 的 `cwd` / `env` 透传、`DraftPES` 类骨架、`core/pes/schema.py` 最小类型定义、`config/pes/draft.yaml` 配置接口。
+
+换言之，本轮交付的是“后续实现 DraftPES 的骨架与约束”，不是完整 DraftPES 功能。`prompt_spec.yaml`、`draft_*.j2`、plan/execute/summarize 的真实业务逻辑，统一留到下一轮。
 
 ## 1.2 审查点（Review Required）
 
 | # | 决策项 | 当前倾向 | 说明 |
 |---|--------|----------|------|
-| 1 | `DraftPES` 是否直接继承 `BasePES` | 是 | 复用现有三阶段调度、Hook、LLM tracing、失败处理 |
-| 2 | 本次是否引入完整 `TaskSpec / GenomeSchema` 类型体系 | 是 | 已确认要引入；当前仓库尚未实现，需作为本计划前置交付 |
-| 3 | Execute 阶段是否接入真实多轮 agent coding / 真实竞赛执行 | 是 | 已确认要接入，不做纯文本占位执行 |
-| 4 | `draft_*.j2` 是否先用占位模板 | 是 | 只约定传入字段与输出格式，后续再补业务内容 |
-| 5 | 本次是否扩展 `BasePES` 通用能力 | 尽量少 | 如确需扩展，需单独报告 |
-| 6 | 基因结构是否先落为 DB 已支持的 `dict[str, dict]` | 是 | 对齐 `PESSolution.genes` 与 `GeneRepository.insert_batch()` 当前能力 |
-| 7 | 本次是否从 `main.py` 接入运行入口 | 否 | 本轮不包含调度器与 CLI 装配，只保证可被测试与手工实例化运行 |
+| 1 | `BasePES` 如何支持 `cwd` / `env` | 新增 phase 级 hook | 由子类提供 phase 运行参数，基类统一透传 |
+| 2 | `DraftPES` 骨架是否要求可运行 | 否 | 只要求可导入、接口明确，不承诺 `run()` 可用 |
+| 3 | `DraftPES.handle_phase_response()` 如何处理 | 显式占位 | 用 `NotImplementedError` 表明业务逻辑待下一轮实现 |
+| 4 | `schema.py` 的范围 | 最小正式类型 | 只定义 DraftPES 下一轮会依赖的核心输入结构 |
+| 5 | `config/pes/draft.yaml` 是否接入 Prompt | 否 | 只定义 phase 配置结构，不配套 `prompt_spec/j2` |
 
-## 1.3 拟议变更（Proposed Changes）
+## 1.3 已核实基线
 
-### PES 实现
+- 已核实：`LLMClient` 已迁移到 `execute_task()`，并支持 `cwd` / `env`
+- 已核实：`BasePES.call_phase_model()` 当前尚未透传 `cwd` / `env`
+- 已核实：`core/tools.py` 已不存在，后续工具访问路径应走 CLI
+- 已核实：当前仓库尚无具体 PES 子类，`DraftPES` 将是首个具体实现
+- 已核实：当前 Prompt 装配链要求 `prompt_spec + j2` 成对存在，因此本轮若不做 Prompt 文件，就不应承诺 `DraftPES.run()` 可用
 
-- [NEW] `core/pes/draft.py::DraftPES`
-  - 继承 `BasePES`
-  - 实现 `handle_phase_response()`
-  - 在 `plan` 阶段解析 LLM JSON，产出 `solution.genes`
-  - 在 `execute` 阶段驱动真实多轮 agent coding、真实竞赛执行、代码工件与指标落盘
-  - 在 `summarize` 阶段写回 insight、状态与完成时间
-- [NEW] `core/pes/draft.py::_extract_json`
-  - 从 LLM 文本提取 JSON，兼容 fenced code block 与裸 JSON
-- [NEW] `core/pes/draft.py::_parse_plan_response`
-  - 将 plan 响应解析为 `dict[str, dict[str, Any]]`
-- [NEW] `core/pes/draft.py::_validate_plan_payload`
-  - 校验 slot、description、rationale、constraints 等最小字段
-- [NEW] `core/pes/draft.py::_extract_metrics`
-  - 从真实执行输出中解析 metrics 协议
-- [NEW] `core/pes/draft.py::_run_execute_session`
-  - 调用真实多轮 agent coding 接口，在 workspace 中生成/调试代码
-- [NEW] `core/pes/draft.py::_run_competition_solution`
-  - 在工作目录真实执行 `solution.py`
-  - 收集 stdout/stderr/exit_code/duration/metrics
-- [NEW] `core/pes/draft.py::_collect_execute_artifacts`
-  - 按当前 `Workspace` 协议读取 `solution.py` 与 `submission.csv`
-  - 触发 `after_solution_file_ready`、`after_execute_metrics`
+## 1.4 拟议变更（Proposed Changes）
 
-### PES 配置
+### A. `BasePES` 增加 `cwd` / `env` 透传能力
 
-- [NEW] `config/pes/draft.yaml`
-  - 定义 `name=draft`
-  - 定义 `operation=draft`
-  - 定义 `solution_file_name=solution.py`
-  - 定义 `submission_file_name=submission.csv`
-  - 定义三阶段的 `template_name`、`tool_names`、`max_retries`
+- [MODIFY] `core/pes/base.py`
+  - [NEW] `build_phase_model_options(phase, solution, parent_solution) -> dict[str, Any]`
+    - 默认返回空字典
+    - 本轮只约定支持两个 key：
+      - `cwd`
+      - `env`
+  - [MODIFY] `_run_phase()`
+    - 在调用模型前收集 `model_options`
+    - 将 `cwd` / `env` 传给 `call_phase_model()`
+  - [MODIFY] `call_phase_model()`
+    - 新增显式参数：
+      - `cwd: str | None = None`
+      - `env: dict[str, str] | None = None`
+    - 透传到 `self.llm.execute_task()`
 
-### Prompt 规格与模板
+### B. `DraftPES` 类骨架
 
-- [MODIFY] `config/prompts/prompt_spec.yaml`
-  - 新增 `draft_plan`
-  - 新增 `draft_execute`
-  - 新增 `draft_summarize`
-  - 仅声明最小 `required_context`
-- [NEW] `config/prompts/templates/draft_plan.j2`
-  - 先定义输入：`agent`、`workspace`、`competition_dir`、`task_spec`、`genome_schema`
-  - 先定义输出：slot -> `{description, rationale, constraints}`
-- [NEW] `config/prompts/templates/draft_execute.j2`
-  - 先定义输入：`solution`、`genes`、`workspace`、`competition_dir`
-  - 先定义输出：`solution.py` / `submission.csv` / metrics 摘要 的约定
-- [NEW] `config/prompts/templates/draft_summarize.j2`
-  - 先定义输入：`solution`、`execution_log`
-  - 先定义输出：简短 insight
+- [NEW] `core/pes/draft.py`
+  - [NEW] `DraftPES(BasePES)`
+    - 继承 `BasePES`
+    - 实现 `build_phase_model_options()`
+      - `plan` / `summarize` 返回空字典
+      - `execute` 在 `workspace` 存在时返回：
+        - `cwd = str(workspace.working_dir)`
+        - `env = {"HERALD_DB_PATH": str(workspace.db_path)}`
+    - 实现 `handle_phase_response()`
+      - 当前阶段显式抛出 `NotImplementedError`
+      - 错误信息中注明：DraftPES 业务逻辑待下一轮实现
 
-### 类型与上下文协议
+- [NO-CHANGE] 本轮不实现：
+  - plan JSON 解析
+  - execute 真实 Agent coding
+  - summarize insight 提取
+  - 工件读取、metrics 抽取、DB 落盘
+
+### C. 最小 Schema
 
 - [NEW] `core/pes/schema.py`
-  - 定义 `TaskSpec`
-  - 定义 `GenomeSchema`
-  - 定义 `SlotContract`
-  - 定义与 `DraftPES` 配套的最小但正式类型体系
-  - 说明：当前仓库中这三类尚不存在，已核实需要本次补齐
-- [MODIFY] `core/pes/types.py::PESSolution`
-  - 若有必要，仅补充 `metadata` 使用约定，不大改结构
-- [MODIFY] `core/pes/base.py::build_prompt_context`
-  - 仅在确有必要时补充 `genes` 或 Draft 特定字段注入
-  - 否则由 `DraftPES` 覆盖该方法，避免污染通用基类
+  - [NEW] `TaskSpec`
+    - `task_type`
+    - `competition_name`
+    - `objective`
+    - `metric_name`
+    - `metric_direction`
+  - [NEW] `SlotContract`
+    - `function_name`
+    - `params`
+    - `return_type`
+  - [NEW] `GenomeSchema`
+    - `task_type`
+    - `slots: dict[str, SlotContract | None]`
 
-### LLM / 执行适配
+- [NO-CHANGE] 本轮不定义：
+  - 复杂 genome DSL
+  - Prompt 上下文字段协议
+  - Gene payload 校验规则
 
-- [MODIFY] `core/llm.py::LLMClient`
-  - 补齐真实多轮 agent coding 所需接口
-  - 优先以最小增量方式支持 `DraftPES.execute()`
-  - 如需要改动 `BasePES.call_phase_model()` 以兼容 execute 特殊调用，先单独报告
-- [MODIFY] `core/tools.py`
-  - 若真实 execute 需要工具集，则补最小工具注册与注入
-- [MODIFY] `core/workspace.py`
-  - 若真实 execute 需要更明确的运行目录/输入输出路径辅助方法，则做最小补充
+### D. `draft.yaml` 配置接口
 
-### 数据持久化
+- [NEW] `config/pes/draft.yaml`
+  - 定义：
+    - `name = draft`
+    - `operation = draft`
+    - `solution_file_name = solution.py`
+    - `submission_file_name = submission.csv`
+  - 定义三阶段配置结构：
+    - `plan`
+    - `execute`
+    - `summarize`
+  - 本轮只要求字段完整，可被 `load_pes_config()` 正常加载
+  - 建议值：
+    - `template_name = null`
+    - `tool_names = []` 或 `["db_cli"]`
+    - `allowed_tools` 保留未来 execute 所需接口
+    - `max_retries`
+    - `max_turns`
 
-- [MODIFY] `core/database/herald_db.py`
-  - 仅在 `DraftPES` 需要更明确的 tracing / exec log 适配时做最小兼容
-- [NO-CHANGE] `core/database/repositories/gene.py`
-  - 前提：继续使用当前 `dict` 结构写入 genes
-- [NO-CHANGE] `core/database/repositories/solution.py`
-  - 前提：`PESSolution.to_record()` 已能覆盖所需字段
+## 1.5 明确不做（Out of Scope）
 
-### 导出与装配
+- 不修改 `config/prompts/prompt_spec.yaml`
+- 不新增 `config/prompts/templates/draft_*.j2`
+- 不实现 `DraftPES.run()` 端到端可用
+- 不实现 plan / execute / summarize 真实业务逻辑
+- 不修改 `core/llm.py`
+- 不接入 `main.py`
+- 不做 DB 持久化与 execute 工件处理
+- 不导出 `DraftPES` 到统一入口，除非实现时发现这是导入所必需的最小改动
 
-- [MODIFY] `core/pes/__init__.py`
-  - 导出 `DraftPES`
-- [MODIFY] `core/pes_engine.py`
-  - 兼容导出 `DraftPES`
-- [NO-CHANGE] `core/main.py`
-  - 本轮明确不接 CLI / 调度器
+## 1.6 验证计划（Verification Plan）
 
-### 测试
+1. 接口冒烟
+   - `from core.pes.draft import DraftPES` 导入成功
+   - `from core.pes.schema import TaskSpec, SlotContract, GenomeSchema` 导入成功
 
-- [NEW] `tests/unit/test_draft_pes.py`
-  - 验证 plan JSON 提取/解析
-  - 验证非法 plan payload 快速失败
-  - 验证 execute metrics 提取协议
-- [NEW] `tests/unit/test_pes_schema.py`
-  - 验证 `TaskSpec / GenomeSchema / SlotContract` 的最小构造与序列化
-- [NEW] `tests/integration/test_draft_pes_flow.py`
-  - 使用真实 `Workspace` + 临时 DB + 可控的测试 LLM/Agent 接口桩
-  - 验证 `DraftPES.run()` 能走完三阶段
-  - 验证 DB 中 solution / genes / llm_calls / exec_logs 已写入
-  - 验证 `solution.py`、`submission.csv` 工件按约定落盘
-  - 验证 execute 阶段真实调用代码生成与本地执行链路，而非纯字符串伪造
+2. 配置冒烟
+   - `load_pes_config("config/pes/draft.yaml")` 成功
+   - `plan/execute/summarize` 三个 phase 都存在
+   - `allowed_tools/max_turns` 字段可正常读取
 
-### 文档
-
-- [MODIFY] `docs/architecture.md`
-  - 补充当前 PES 层关系：`BasePES` 为通用三阶段骨架，`DraftPES` 为首个具体实现
-- [MODIFY] `docs/TD.md`
-  - 补充 `DraftPES`、`DraftTaskSpec`、`DraftGenomeSchema` 的最小接口说明
-
-## 1.4 验证计划（Verification Plan）
-
-1. 单元测试
-   - `tests/unit/test_draft_pes.py` 通过
-   - 覆盖 JSON 提取、plan 解析、metrics 提取、异常分支
-2. 集成测试
-   - `tests/integration/test_draft_pes_flow.py` 通过
-   - 验证 `DraftPES` 在无真实竞赛逻辑下完成最小闭环
-3. 人工抽检
-   - 检查 `config/pes/draft.yaml` 可被 `load_pes_config()` 正常加载
-   - 检查 `PromptManager.build_prompt("draft", phase, context)` 能找到对应模板
-   - 检查生成工件与 DB 记录字段一致
+3. 透传冒烟
+   - 使用最小 DummyPES / DummyLLM 验证：
+     - `build_phase_model_options()` 返回的 `cwd` / `env`
+     - 能经由 `BasePES._run_phase() -> call_phase_model() -> llm.execute_task()` 透传
 
 ## 2. 实施边界
 
-- 本次只做 Herald2 里的第一个真实可跑 `DraftPES`
-- 不做 mutate / crossover / selection
-- 不做调度器与 `main.py` 入口接线
-- 不做高质量 Prompt 设计优化
-- 不做复杂 Tool 白名单治理
-- 不做多 Agent 协作编排
+- 本轮只做接口，不做功能
+- 本轮只定型，不做 Prompt
+- 本轮只保证骨架可导入、配置可加载、`cwd/env` 接口可透传
+- 本轮不承诺 `DraftPES.run()` 可执行
 
-## 3. 已知现状
+## 3. 风险与缓解
 
-- 已核实：仓库中尚无正式 `TaskSpec / GenomeSchema / SlotContract` 实现
-- 已核实：当前仓库中尚无任何具体 PES 子类，`DraftPES` 将是首个具体实现
-- 已核实：当前 `LLMClient` 只有 `call_with_tools()`，没有旧项目里那种现成的 execute-task 接口
+| 风险 | 缓解 |
+|------|------|
+| 用户误以为 `DraftPES` 已可运行 | `handle_phase_response()` 显式抛出 `NotImplementedError` |
+| `draft.yaml` 存在但无 Prompt 文件，后续误调用运行链路 | 在计划与实现注释中明确“配置先行，Prompt 待后续补齐” |
+| `BasePES` 新增接口影响未来子类 | 默认实现返回空字典，保持向后兼容 |
 
-## 4. 风险与缓解
+## 4. 待审核结论
 
-- 风险 1：当前仓库还没有 `TaskSpec / GenomeSchema / SlotContract` 正式实现
-  - 缓解：本次先补齐正式最小实现，并以此驱动 DraftPES
-- 风险 2：`BasePES.build_prompt_context()` 当前只注入通用字段，Draft 所需上下文可能不够
-  - 缓解：优先在 `DraftPES` 内局部覆盖，不扩大通用基类职责
-- 风险 3：`LLMClient` 当前缺少真实 execute-task 级接口，可能不足以承载多轮 coding
-  - 缓解：优先在 `LLMClient` 增加最小 execute 能力；若必须改 `BasePES` 通用调用路径，单独报告
-- 风险 4：PromptSpec 对 `required_context` 校验很严格，漏字段会直接失败
-  - 缓解：先让 `draft_*.j2` 极简，并为每个 phase 明确最小上下文字段
-- 风险 5：真实竞赛执行依赖外部数据、环境与命令约定，测试中容易不稳定
-  - 缓解：集成测试使用可控最小数据与受控执行脚本，先验证主链路正确性
-
-## 5. 待审核结论
-
-建议按上述修订版执行：`DraftPES` 继承 `BasePES`，本次同步补齐正式 `TaskSpec / GenomeSchema / SlotContract`，接入真实 execute 主链路，但保持占位 `draft_*.j2` 与最小 `BasePES` 侵入；若实现过程中发现必须扩展 `BasePES`，我会先单独报告再改。
+建议按本收缩版执行。本版严格只覆盖 4 项接口层交付：`BasePES.cwd/env`、`DraftPES` 骨架、`schema.py`、`draft.yaml`；Prompt、真实 phase 逻辑与端到端运行统一推迟到下一轮。
