@@ -22,8 +22,8 @@ def test_load_returns_complete_profile() -> None:
     assert profile.name == "kaggle_master"
     assert profile.display_name == "Kaggle Master"
     assert len(profile.prompt_text) > 0
-    assert "你是 `kaggle_master`" in profile.prompt_text
-    assert "执行风格与策略偏好" in profile.prompt_text
+    assert "Kaggle Grandmaster" in profile.prompt_text
+    assert "奖牌级别" in profile.prompt_text
 
 
 def test_system_context_only_contains_global_rules() -> None:

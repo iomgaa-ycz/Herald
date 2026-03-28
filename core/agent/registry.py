@@ -65,22 +65,33 @@ class AgentRegistry:
 
         agent_name = str(payload.get("name", normalized_name)).strip()
         display_name = str(payload.get("display_name", agent_name)).strip()
-        prompt_file = str(payload.get("prompt_file", "")).strip()
         if not agent_name:
             raise ValueError(f"Agent 配置缺少 name: {config_path}")
         if not display_name:
             raise ValueError(f"Agent 配置缺少 display_name: {config_path}")
-        if not prompt_file:
-            raise ValueError(f"Agent 配置缺少 prompt_file: {config_path}")
 
-        prompt_path = (self.agents_dir / prompt_file).resolve()
-        if not prompt_path.exists():
-            raise FileNotFoundError(f"Agent Prompt 不存在: {prompt_path}")
+        # 支持内联 prompt_text 或外部 prompt_file
+        prompt_text_inline = str(payload.get("prompt_text", "")).strip()
+        prompt_file = str(payload.get("prompt_file", "")).strip()
+
+        if prompt_text_inline:
+            # 优先使用内联 prompt_text
+            prompt_text = prompt_text_inline
+        elif prompt_file:
+            # 回退到外部文件
+            prompt_path = (self.agents_dir / prompt_file).resolve()
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Agent Prompt 不存在: {prompt_path}")
+            prompt_text = prompt_path.read_text(encoding="utf-8").strip()
+        else:
+            raise ValueError(
+                f"Agent 配置需要 prompt_text 或 prompt_file: {config_path}"
+            )
 
         profile = AgentProfile(
             name=agent_name,
             display_name=display_name,
-            prompt_text=prompt_path.read_text(encoding="utf-8").strip(),
+            prompt_text=prompt_text,
         )
         self._cache[normalized_name] = profile
         return profile

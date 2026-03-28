@@ -106,3 +106,34 @@ def test_prompt_manager_can_render_all_draft_templates() -> None:
         prompt = manager.build_prompt("draft", phase, context)
         assert expected_marker in prompt
         assert "全局系统规则" in prompt
+
+
+def test_system_context_has_no_overengineering_rule() -> None:
+    """system_context 不含与金牌目标冲突的规则。"""
+
+    fragment_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "prompts"
+        / "fragments"
+        / "system_context.md"
+    )
+    content = fragment_path.read_text(encoding="utf-8")
+
+    assert "过度工程化" not in content
+    assert "持续优化" in content or "最佳分数" in content
+    assert "禁止抄袭" in content
+
+
+def test_draft_execute_has_tools_and_format() -> None:
+    """draft_execute.j2 含可用工具清单和强制输出格式。"""
+
+    manager = _build_prompt_manager()
+    context = _build_draft_context()
+
+    prompt = manager.build_prompt("draft", "execute", context)
+
+    assert "可用工具" in prompt
+    assert "执行报告" in prompt
+    assert "代码实现" in prompt
+    assert "验证结果" in prompt
