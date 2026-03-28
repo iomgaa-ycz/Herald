@@ -38,8 +38,8 @@ Herald2 的系统设计由以下能力组成：
 
 | 核心能力 | 定义 | 当前状态 |
 |---|---|---|
-| 基因级方案表示 | 方案最终按 slot / gene 建模，而不是整段代码黑箱搜索 | 仅有 `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型与 DB 预留 |
-| PES 研究闭环 | 所有核心操作统一走 `Plan / Execute / Summarize` | `BasePES` + `DraftPES` 已跑通三阶段调用 |
+| 基因级方案表示 | 方案最终按 slot / gene 建模，而不是整段代码黑箱搜索 | 仅有 `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型与 DB 预留；GenomeSchema 模板体系（tabular / generic）已设计 |
+| PES 研究闭环 | 所有核心操作统一走 `Plan / Execute / Summarize` | `BasePES` + `DraftPES` 已跑通三阶段调用；`FeatureExtractPES` 已设计为前置 PES |
 | 分层记忆 | 运行日志、结构化经验、跨任务规律分层沉淀 | L1/L2/L3 相关表已建，真正知识回流尚未接入运行链路 |
 | 多操作进化 | 系统最终由 `Draft / Mutate / Merge` 三类操作驱动 | 目前只有 `DraftPES` 实现 |
 | 调度与编排 | 外层调度器负责任务驱动、预算与并行控制 | 当前是单进程、串行 `Scheduler` |
@@ -160,44 +160,80 @@ Herald2 是研究项目，最怕“代码已经变了，但系统理解没变”
 
 当前仓库已经实现的，不是完整进化系统，而是一个**单进程、单任务类型、串行驱动的 DraftPES MVP 闭环**。
 
-### 5.1 当前主链路
+### 5.1 目标主链路
+
+> **图例**: ✅ 已实现 · ⬜ 待实现 · 🔄 需修改
 
 ```text
 core/main.py
   │
-  ├── ConfigManager.parse()
-  ├── Workspace.create()
-  ├── HeraldDB(...)
-  ├── EventBus.get()
-  ├── setup_task_dispatcher()
-  ├── bootstrap_draft_pes(...)
+  ├── ✅ ConfigManager.parse()
+  ├── ✅ Workspace.create()
+  ├── ✅ HeraldDB(...)
+  ├── ✅ EventBus.get()
+  ├── ✅ setup_task_dispatcher()
+  ├── ⬜ bootstrap_feature_extract_pes(...)        # [NEW] 前置数据分析 PES
+  │      ├── load_pes_config("config/pes/feature_extract.yaml")
+  │      ├── LLMClient(...)
+  │      └── FeatureExtractPES(...)
+  ├── ✅ bootstrap_draft_pes(...)
   │      ├── load_pes_config("config/pes/draft.yaml")
   │      ├── LLMClient(...)
   │      └── DraftPES(...)
-  │             └── BasePES.__init__()
-  │                    ├── PESRegistry.register(self)
-  │                    └── EventBus.on(TaskExecuteEvent, self.on_execute)
   │
-  └── Scheduler.run()
+  └── 🔄 Scheduler(task_stages=[                   # [MODIFY] 支持多阶段流水线
+          ("feature_extract", 1),
+          ("draft", max_tasks),
+      ]).run()
           │
-          ├── emit(TaskDispatchEvent)
-          ▼
-    TaskDispatcher.handle_dispatch()
-          ├── AgentRegistry.load("kaggle_master")
-          ├── PESRegistry.get_by_base_name("draft")
-          └── emit(TaskExecuteEvent)
-                  ▼
-              DraftPES.on_execute()
-                  ▼
-              asyncio.create_task(DraftPES.run())
+          ├── ⬜ Stage 1: emit(TaskDispatchEvent(task_name="feature_extract"))
+          │     ▼
+          │   TaskDispatcher → FeatureExtractPES.run()
+          │     ├── plan:     分析竞赛描述，规划数据探索策略
+          │     ├── execute:  LLM Agent 用 Bash 工具读取数据文件
+          │     │             → 生成 TaskSpec + data_profile + 选择 genome_template
+          │     └── summarize: 总结数据特征与建模建议
+          │     ▼
+          │   TaskCompleteEvent (携带 output_context)
+          │     → Scheduler 收集 TaskSpec / data_profile / genome_template
+          │
+          └── ✅ Stage 2: emit(TaskDispatchEvent(task_name="draft", context=上游产出))
+                ▼
+              TaskDispatcher → DraftPES.run()
+                ├── plan:     消费 TaskSpec + data_profile + GenomeSchema 模板
+                ├── execute:  实现代码
+                └── summarize: 总结
 ```
 
-### 5.2 当前 `DraftPES.run()` 真实行为
+### 5.2 FeatureExtractPES.run() 行为
+
+```text
+FeatureExtractPES.run()
+  ├── create_solution()          -> 插入 solutions
+  ├── plan()                     -> 渲染 feature_extract_plan Prompt
+  │      └── 分析竞赛 description.md，规划数据探索策略
+  ├── execute_phase()            -> 渲染 feature_extract_execute Prompt
+  │      ├── LLM Agent 用 Bash 工具执行数据探索:
+  │      │     - ls data/、head train.csv
+  │      │     - python -c "pd.read_csv(...).info()"
+  │      │     - 读取 description.md 提取任务目标与指标
+  │      ├── 输出结构化 TaskSpec JSON
+  │      ├── 输出数据概况报告 (data_profile)
+  │      ├── 判断任务类型并选择 GenomeSchema 模板 (tabular/generic)
+  │      └── 持久化到 workspace/working/:
+  │            - task_spec.json
+  │            - data_profile.md
+  └── summarize()                -> 总结数据特征、关键发现、建模建议
+         └── emit(TaskCompleteEvent, output_context={task_spec, data_profile, genome_template})
+```
+
+### 5.3 DraftPES.run() 真实行为
 
 ```text
 DraftPES.run()
   ├── create_solution()          -> 插入 solutions
   ├── plan()                     -> 渲染 draft_plan Prompt，调 LLM，记录 llm_calls
+  │      └── 消费 task_spec + data_profile + GenomeSchema 模板
   ├── execute_phase()            -> 渲染 draft_execute Prompt，调 LLM，记录 llm_calls
   │      └── _attach_workspace_artifacts()
   │             ├── 设置 workspace_dir / solution_file_path
@@ -206,9 +242,9 @@ DraftPES.run()
          └── emit(TaskCompleteEvent)
 ```
 
-### 5.3 当前必须明确的事实
+### 5.4 当前必须明确的事实
 
-- 现在只有一个生产级 PES：`DraftPES`
+- 当前阶段有两个生产级 PES：`FeatureExtractPES`（前置）和 `DraftPES`（主链路）
 - 现在只有一个 Agent profile：`kaggle_master`
 - `Scheduler` 是**串行**的，不是并行的
 - `EventBus` 是**进程内总线**，不是分布式消息系统
@@ -229,10 +265,12 @@ DraftPES.run()
 | `core/scheduler/` | 最小调度器，串行发任务并等待完成 | 已实现 |
 | `core/events/` | 进程内事件总线与任务分发 | 已实现 |
 | `core/pes/base.py` | 统一的 PES 三阶段抽象 | 已实现 |
+| `core/pes/feature_extract.py` | FeatureExtract 操作：数据分析 + TaskSpec 生成 + GenomeSchema 选择 | 待实现 |
 | `core/pes/draft.py` | Draft 操作的最小落地 | 已实现，但执行能力仍很薄 |
 | `core/pes/config.py` | PES YAML 配置加载 | 已实现 |
 | `core/pes/types.py` | `PESSolution` 运行期状态模型 | 已实现 |
-| `core/pes/schema.py` | `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型 | 已实现，但尚未真正接入主流程 |
+| `core/pes/schema.py` | `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型 + 模板加载 | 已实现类型，模板加载待实现 |
+| `config/genome_templates/` | GenomeSchema 代码模板（tabular.py / generic.py） | 待实现 |
 | `core/agent/` | Agent profile 注册与加载 | 已实现，当前仅 prompt profile |
 | `core/prompts/` | 首次 Prompt 装配 | 已实现 |
 | `config/prompts/templates/` | `draft_plan/execute/summarize` 模板 | 已实现 |
@@ -259,15 +297,54 @@ DraftPES.run()
 
 ### 7.2 任务规格边界：`TaskSpec + SlotContract + GenomeSchema`
 
-这三个类型代表了 Herald2 后续从“整段代码生成”走向“受约束的基因级搜索”的边界。
+这三个类型代表了 Herald2 后续从”整段代码生成”走向”受约束的基因级搜索”的边界。
 
 其职责应是：
 
-- `TaskSpec`：定义赛题目标、指标与任务类型
+- `TaskSpec`：定义赛题目标、指标与任务类型。**由 `FeatureExtractPES` 动态生成**，不再静态构造
 - `SlotContract`：定义每个 slot 的接口边界
-- `GenomeSchema`：定义某类任务允许搜索哪些 slot
+- `GenomeSchema`：定义某类任务允许搜索哪些 slot。**携带代码模板文件路径**
 
-当前问题不在于“类型不存在”，而在于**它们还没有注入生产运行链路**。
+#### TaskSpec 动态生成流
+
+```text
+竞赛目录 (description.md + data files)
+  → FeatureExtractPES.execute()
+  → LLM Agent 分析数据结构与竞赛描述
+  → 输出结构化 TaskSpec JSON:
+      {task_type, competition_name, objective, metric_name, metric_direction}
+  → 持久化到 workspace/working/task_spec.json
+  → 通过 TaskCompleteEvent.output_context 传递给 Scheduler
+  → 注入 DraftPES 的 runtime_context
+```
+
+#### GenomeSchema 模板体系
+
+不同任务类型使用不同的代码模板骨架：
+
+| task_type | 模板文件 | slots | 说明 |
+|---|---|---|---|
+| `tabular` | `config/genome_templates/tabular.py` | DATA, FEATURE_ENG, MODEL, POSTPROCESS | 标准表格任务，含 GENE 标记区域 |
+| `generic` | `config/genome_templates/generic.py` | DATA, PROCESS, MODEL, POSTPROCESS | 通用模板，兼容非 tabular 任务 |
+
+模板文件格式遵循 `Reference/tabular_ml.py` 的约定：
+- `# === GENE:XXX_START ===` / `# === GENE:XXX_END ===` 标记 LLM 可填充的 slot 区域
+- `# === FIXED:XXX ===` / `# === FIXED:XXX_END ===` 标记不可修改的固定区域
+- 模板选择由 `FeatureExtractPES` 根据 task_type 判断确定
+
+`GenomeSchema` 新增 `template_file` 字段指向对应的模板文件路径。`load_genome_template(task_type)` 函数根据 task_type 返回对应的 `GenomeSchema` + 模板代码内容。
+
+#### FeatureExtractPES 输出数据流
+
+```text
+FeatureExtractPES 产出:
+  ├── TaskSpec              → runtime_context[“task_spec”]
+  ├── data_profile          → runtime_context[“data_profile”] (文本报告)
+  ├── genome_template       → runtime_context[“schema”] (GenomeSchema + template_content)
+  └── workspace 持久化:
+        ├── working/task_spec.json
+        └── working/data_profile.md
+```
 
 ### 7.3 HeraldDB 的分层职责
 
@@ -312,12 +389,30 @@ DraftPES.run()
 
 职责边界如下：
 
-- `Scheduler`：决定发几次任务、何时发下一个
-- `TaskDispatcher`：把“任务名”映射成“具体 PES 实例”
+- `Scheduler`：决定发几次任务、何时发下一个。**支持 `task_stages` 多阶段流水线**
+- `TaskDispatcher`：把”任务名”映射成”具体 PES 实例”（无需修改）
 - `EventBus`：负责消息通知
-- `PESRegistry`：负责查询已注册 PES
+- `PESRegistry`：负责查询已注册 PES（无需修改）
 
-这层目前只解决“驱动问题”，还不负责：
+#### task_stages 机制
+
+`Scheduler` 新增 `task_stages: list[tuple[str, int]]` 参数，支持按阶段顺序调度不同 PES：
+
+```text
+task_stages = [
+    (“feature_extract”, 1),    # 前置阶段：运行 1 次
+    (“draft”, max_tasks),      # 主阶段：运行 N 次
+]
+```
+
+阶段之间的数据传递：
+1. 每个阶段完成后，Scheduler 从 `TaskCompleteEvent.output_context` 收集产出
+2. 产出合并到 `shared_context`，注入下一阶段的 dispatch context
+3. 下游 PES 通过 `_execution_context` 访问上游产出
+
+向后兼容：不传 `task_stages` 时，退化为原有 `(task_name, max_tasks)` 行为。
+
+这层目前只解决”驱动问题”，还不负责：
 
 - 种群选择
 - 预算分配
@@ -354,24 +449,18 @@ DraftPES.run()
 
 为了避免开发歪掉，这里要明确：**接下来最该做的，不是“再加一个更大的架构层”，而是把当前闭环补实。**
 
-### 9.1 P0：把任务规格真正注入运行时
+### 9.1 P0：FeatureExtractPES + 任务规格动态生成
 
-当前 prompt 模板已经支持：
+当前 prompt 模板已经支持 `task_spec`、`schema`、`workspace`、`recent_error`、`template_content`，但生产 bootstrap 只注入了 `competition_dir`。
 
-- `task_spec`
-- `schema`
-- `workspace`
-- `recent_error`
-- `template_content`
+`TaskSpec` 不再由 bootstrap 静态构造，而是由 `FeatureExtractPES` 动态生成。因此必须补：
 
-但生产 bootstrap 只注入了 `competition_dir`。
-
-因此下一步必须补：
-
-- 赛题识别
-- `TaskSpec` 构造
-- `GenomeSchema` 选择/生成
-- 注入 `DraftPES.runtime_context`
+- 实现 `FeatureExtractPES`（plan/execute/summarize 三阶段）
+- execute 阶段：LLM Agent 用工具分析数据文件，生成 TaskSpec + data_profile + 选择 GenomeSchema 模板
+- 实现 GenomeSchema 模板加载（tabular.py / generic.py）
+- Scheduler 支持 `task_stages` 多阶段流水线
+- `FeatureExtractPES` 产出注入 `DraftPES.runtime_context`
+- DraftPES prompt 模板消费 `data_profile`
 
 ### 9.2 P0：把 execute 输出沉淀成真实代码
 
@@ -433,6 +522,7 @@ DraftPES.run()
 | 阶段 | 目标 | 关键交付 |
 |---|---|---|
 | M0-now | 单 `DraftPES` 调用链打通 | 已完成 |
+| M0.3 | FeatureExtractPES + GenomeSchema 模板 | `FeatureExtractPES` 数据分析与 TaskSpec 生成、`task_stages` 调度、tabular/generic 模板、DraftPES 消费 data_profile |
 | M0.5 | 真实代码落盘与执行验证 | `solution.py` 写入、执行、metrics、submission、`exec_logs` |
 | M1 | 单谱系进化 | `MutatePES`、parent/child、genes/snapshots 真接入 |
 | M2 | 完整方案级搜索骨架 | `MergePES`、L2/L3 回流、schema 驱动搜索 |
@@ -457,4 +547,4 @@ Herald2 的正确方向不是“把更多 Agent 堆起来”，而是：
 
 **以 `TaskSpec / GenomeSchema` 定义搜索空间，以 `BasePES` 定义研究循环，以 `Workspace + HeraldDB` 定义可追踪 Harness，再在这个稳定底座上逐步长出 `Draft -> Mutate -> Merge -> Population -> Orchestrator`。**
 
-当前代码已经把这个方向的骨架搭出来了，但系统仍处于**单 `DraftPES` Harness MVP** 阶段；接下来最重要的是把 execute 产物、执行验证和知识回流真正接上。
+当前代码已经把这个方向的骨架搭出来了，系统正从**单 `DraftPES` Harness MVP** 阶段推进到 **`FeatureExtractPES + DraftPES` 双 PES 流水线** 阶段；接下来最重要的是实现 FeatureExtractPES 动态生成 TaskSpec、GenomeSchema 模板体系，以及把 execute 产物、执行验证和知识回流真正接上。
