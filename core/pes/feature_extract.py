@@ -11,6 +11,7 @@ from typing import Any
 from core.events.bus import EventBus
 from core.events.types import TaskCompleteEvent
 from core.pes.base import BasePES
+from core.pes.schema import load_genome_template
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
 
@@ -102,13 +103,18 @@ class FeatureExtractPES(BasePES):
                 "无效的 genome_template '%s'，降级为 'generic'", genome_template
             )
             genome_template = "generic"
+        schema, template_content = load_genome_template(genome_template)
 
         # Phase 3: 持久化到 workspace
         self._persist_task_spec(task_spec_dict)
         self._persist_data_profile(data_profile)
 
         # Phase 4: 更新 solution metadata
+        solution.metadata["task_spec"] = task_spec_dict
+        solution.metadata["data_profile"] = data_profile
         solution.metadata["genome_template"] = genome_template
+        solution.metadata["schema"] = schema
+        solution.metadata["template_content"] = template_content
         solution.metadata["schema_task_type"] = task_spec_dict.get("task_type", "")
 
         # Phase 5: 挂载工件路径
@@ -119,6 +125,8 @@ class FeatureExtractPES(BasePES):
             "task_spec": task_spec_dict,
             "data_profile": data_profile,
             "genome_template": genome_template,
+            "schema": schema,
+            "template_content": template_content,
         }
 
     def _handle_summarize_response(
@@ -138,10 +146,26 @@ class FeatureExtractPES(BasePES):
                 pes_instance_id=self.instance_id,
                 status="completed",
                 solution_id=solution.id,
+                output_context=self._build_output_context(solution),
             )
         )
 
         return {"phase": "summarize", "response_text": response_text}
+
+    def _build_output_context(self, solution: PESSolution) -> dict[str, Any]:
+        """构造供下游 DraftPES 消费的阶段产出上下文。"""
+
+        output_context: dict[str, Any] = {}
+        for key in (
+            "task_spec",
+            "data_profile",
+            "genome_template",
+            "schema",
+            "template_content",
+        ):
+            if key in solution.metadata:
+                output_context[key] = solution.metadata[key]
+        return output_context
 
     def _extract_response_text(self, response: object) -> str:
         """提取模型响应文本。"""
