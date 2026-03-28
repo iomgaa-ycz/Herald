@@ -1,0 +1,11 @@
+{
+  "task_spec": {
+    "task_type": "tabular",
+    "competition_name": "unknown-competition",
+    "objective": "预测 target 列的值",
+    "metric_name": "",
+    "metric_direction": ""
+  },
+  "data_profile": "训练集500行8列，目标列为连续值（0~1范围），7个数值特征，无缺失值。竞赛描述未提供评估指标信息。",
+  "genome_template": "tabular"
+}

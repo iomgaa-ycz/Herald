@@ -1,0 +1,10 @@
+competition_id: spaceship-titanic
+task_type: tabular
+metric_name: accuracy
+metric_direction: maximize
+relative_root: spaceship-titanic/prepared/public
+required_public_files:
+  - description.md
+  - train.csv
+  - test.csv
+  - sample_submission.csv

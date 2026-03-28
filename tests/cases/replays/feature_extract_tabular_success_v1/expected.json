@@ -1,0 +1,11 @@
+{
+  "task_spec": {
+    "task_type": "tabular",
+    "competition_name": "Tabular Playground Series - May 2022",
+    "objective": "二分类：预测制造过程机器状态（0或1），数据包含多种特征交互",
+    "metric_name": "auc",
+    "metric_direction": "maximize"
+  },
+  "data_profile": "训练集800,000样本，测试集100,000样本，31个特征。特征类型：16个连续型（f_00~f_06, f_19~f_26, f_28，已归一化），14个离散整数型（f_07~f_18, f_29, f_30，取值范围0~9），1个高基数类别型（f_27，670,919个唯一值，10字符字母串）。无缺失值。目标变量为二分类，分布相对平衡（0类51.4%，1类48.6%）。竞赛重点提示需识别和利用特征交互。",
+  "genome_template": "tabular"
+}

@@ -1,0 +1,22 @@
+竞赛描述文件中仅包含简短说明，未明确给出评估指标。
+
+通过分析数据结构推断：
+- train.csv 包含 500 行 8 列
+- 目标列为 target（浮点值 0~1），可能是回归任务
+- 无 description.md 中的 metric 说明
+
+由于描述缺失关键评估信息，metric_name 和 metric_direction 留空，交由下游处理。
+
+```json
+{
+  "task_spec": {
+    "task_type": "tabular",
+    "competition_name": "unknown-competition",
+    "objective": "预测 target 列的值",
+    "metric_name": "",
+    "metric_direction": ""
+  },
+  "data_profile": "训练集500行8列，目标列为连续值（0~1范围），7个数值特征，无缺失值。竞赛描述未提供评估指标信息。",
+  "genome_template": "tabular"
+}
+```

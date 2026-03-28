@@ -1,0 +1,10 @@
+competition_id: tabular-playground-series-may-2022
+task_type: tabular
+metric_name: auc
+metric_direction: maximize
+relative_root: tabular-playground-series-may-2022/prepared/public
+required_public_files:
+  - description.md
+  - train.csv
+  - test.csv
+  - sample_submission.csv
