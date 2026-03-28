@@ -1,0 +1,48 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `feature_extract_plan` phase，需要规划竞赛数据的探索与分析策略。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 竞赛信息
+
+- `competition_dir`: `{{ competition_dir | default("未提供") }}`
+
+# 任务目标
+
+你需要为即将进行的数据分析制定探索计划。你的目标是：
+
+1. 了解竞赛的任务类型（tabular / 其他）
+2. 确定评估指标（metric_name 和 metric_direction）
+3. 了解数据结构（字段、类型、缺失值、数据量）
+4. 了解 submission 格式要求
+
+# 输出格式
+
+请按以下结构输出你的探索计划：
+
+## 竞赛概述
+- 基于已知信息，初步判断竞赛类型
+
+## 探索步骤
+1. 读取竞赛描述文件，提取任务目标和评估指标
+2. 列出数据目录结构
+3. 查看训练数据样本和统计信息
+4. 分析 sample_submission.csv 的格式
+5. 确定任务类型并选择对应的代码模板
+
+## 关键关注点
+- 需要特别关注的数据特征或潜在问题

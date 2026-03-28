@@ -1,0 +1,85 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `feature_extract_execute` phase，需要用工具分析竞赛数据并输出结构化结果。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 竞赛信息
+
+- `competition_dir`: `{{ competition_dir | default("未提供") }}`
+
+{% if workspace %}
+# 工作空间
+
+- `workspace_root`: `{{ workspace.workspace_root }}`
+- `data_dir`: `{{ workspace.data_dir }}`
+- `working_dir`: `{{ workspace.working_dir }}`
+{% endif %}
+
+{% if solution.plan_summary %}
+# Plan 阶段摘要
+
+{{ solution.plan_summary }}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 执行要求
+
+请使用提供的工具完成以下数据探索任务：
+
+1. **读取竞赛描述**: 查找并读取 `data/` 目录下的 `description.md` 或类似描述文件，提取任务目标和评估指标
+2. **列出数据文件**: `ls data/` 了解文件结构
+3. **查看数据样本**: `head -20 data/train.csv`（或对应的训练数据文件）
+4. **获取数据概况**: 使用 Python 获取数据形状、列类型、缺失值等统计信息
+5. **分析提交格式**: 查看 `data/sample_submission.csv` 了解输出要求
+
+## 任务类型判断规则
+
+- 如果数据是 CSV 格式的结构化表格数据（含数值/类别列），任务类型为 `tabular`
+- 其他情况（图像、文本、音频等），任务类型为 `generic`
+
+# 输出格式
+
+完成分析后，你**必须**在最后输出一个包含以下结构的 JSON code block：
+
+```json
+{
+  "task_spec": {
+    "task_type": "tabular 或 generic",
+    "competition_name": "竞赛名称",
+    "objective": "任务目标的简短描述",
+    "metric_name": "评估指标名（如 auc, rmse, accuracy）",
+    "metric_direction": "maximize 或 minimize"
+  },
+  "data_profile": "数据概况报告：包含数据集大小、特征数量、特征类型分布、缺失值情况、目标变量分布等关键信息",
+  "genome_template": "tabular 或 generic"
+}
+```
+
+**注意**：
+- JSON 必须是合法的、可解析的
+- `task_spec` 中所有字段都必须填写
+- `data_profile` 应包含足够的信息供后续建模参考
+- `genome_template` 必须是 `tabular` 或 `generic`

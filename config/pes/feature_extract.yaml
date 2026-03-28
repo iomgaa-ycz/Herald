@@ -1,0 +1,26 @@
+name: feature_extract
+operation: feature_extract
+solution_file_name: data_profile.md
+submission_file_name: null
+
+phases:
+  plan:
+    template_name: null
+    tool_names: []
+    max_retries: 1
+    allowed_tools: []
+    max_turns: 1
+
+  execute:
+    template_name: null
+    tool_names: []
+    max_retries: 1
+    allowed_tools: ["Bash", "Read", "Glob", "Grep"]
+    max_turns: 12
+
+  summarize:
+    template_name: null
+    tool_names: []
+    max_retries: 1
+    allowed_tools: []
+    max_turns: 1

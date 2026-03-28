@@ -3,6 +3,24 @@
 
 templates:
 
+  # FeatureExtract 操作 - Plan 阶段
+  feature_extract_plan:
+    required_context: ["solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  # FeatureExtract 操作 - Execute 阶段
+  feature_extract_execute:
+    required_context: ["solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  # FeatureExtract 操作 - Summarize 阶段
+  feature_extract_summarize:
+    required_context: ["solution", "execution_log"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
   # Draft 操作 - Plan 阶段
   draft_plan:
     required_context: ["solution"]

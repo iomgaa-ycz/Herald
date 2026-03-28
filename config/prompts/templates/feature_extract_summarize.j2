@@ -1,0 +1,56 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `feature_extract_summarize` phase，需要总结数据分析的结果并提供建模建议。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+{% endif %}
+
+{% if solution.plan_summary %}
+# Plan 阶段摘要
+
+{{ solution.plan_summary }}
+{% endif %}
+
+{% if execution_log %}
+# 执行日志
+
+{{ execution_log }}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 总结要求
+
+基于执行阶段的数据分析结果，请总结以下内容：
+
+## 数据特征总结
+- 数据集的核心特征（大小、维度、类型）
+- 数据质量（缺失值、异常值、类别分布）
+
+## 关键发现
+- 影响建模决策的关键数据特征
+- 潜在的数据问题或挑战
+
+## 建模建议
+- 推荐的建模方法（基于数据特征）
+- 特征工程方向
+- 需要注意的评估指标细节
+- 预期的难度和风险
+
+## 模板选择理由
+- 为什么选择当前的 genome_template（tabular / generic）
+- 模板中各 slot 的初步实现方向
