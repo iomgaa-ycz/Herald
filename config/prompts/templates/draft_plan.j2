@@ -44,6 +44,16 @@
 - 未提供 `task_spec`，请基于其余上下文做最小可行假设，不要因此停滞。
 {% endif %}
 
+{% if data_profile %}
+# 数据概况
+
+{{ data_profile }}
+{% else %}
+# 数据概况
+
+- 未提供 `data_profile`，请仅基于任务规格做最小可行规划，并把关键不确定性写入假设。
+{% endif %}
+
 {% if schema %}
 # Genome Schema
 
@@ -114,6 +124,7 @@
 - 如果外部说明文档、补充材料或某些工件不存在，不要阻塞；基于现有上下文做最小必要假设，并把假设写明。
 - 若存在父方案，先判断哪些 slot 应复用、哪些 slot 应重写，并说明原因。
 - 方案必须围绕锁定指标展开，避免与 `metric_name` / `metric_direction` 无关的设计。
+- 明确利用 `data_profile` 中的字段类型、缺失值、数据规模与 submission 约束，决定特征工程和模型复杂度。
 
 ## 方案约束
 
