@@ -106,6 +106,7 @@ class LLMClient:
 
         turns: list[dict[str, Any]] = []
         pending_tool_calls: dict[str, dict[str, Any]] = {}
+        result_response: LLMResponse | None = None
 
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
@@ -134,7 +135,7 @@ class LLMClient:
 
             elif isinstance(message, ResultMessage):
                 usage = message.usage or {}
-                return LLMResponse(
+                result_response = LLMResponse(
                     result=message.result or "",
                     turns=turns,
                     model=self.config.model,
@@ -145,4 +146,6 @@ class LLMClient:
                     session_id=message.session_id,
                 )
 
-        raise RuntimeError("未收到 ResultMessage")
+        if result_response is None:
+            raise RuntimeError("未收到 ResultMessage")
+        return result_response
