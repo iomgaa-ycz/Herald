@@ -57,6 +57,14 @@
 - Fitness：{{ solution.fitness if solution and solution.fitness is not none else "unknown" }}
 - 状态：{{ solution.status if solution and solution.status else "unknown" }}
 
+{% if parent_solution and parent_solution.metrics and parent_solution.metrics.metric_value is not none %}
+# 指标对比
+
+- 本轮: {{ metric_value }}
+- 父方案: {{ parent_solution.metrics.metric_value }}
+- 变化: {{ "提升" if (metric_direction == "max" and metric_value > parent_solution.metrics.metric_value) or (metric_direction == "min" and metric_value < parent_solution.metrics.metric_value) else "下降" }}
+{% endif %}
+
 {% if parent_solution %}
 # 父方案参考
 
@@ -108,3 +116,13 @@
 - 明确保留的做法
 - 明确需要修改的 slot 或实现点
 - 明确需要补充的观测、日志或基础设施
+
+## 迭代方向
+
+{% if time_budget and time_budget != "未知" %}
+基于剩余时间预算，建议：
+- 若预算充裕：考虑特征工程/模型调参/算法对比
+- 若预算紧张：聚焦验证当前方案，确保提交有效
+{% else %}
+基于当前状态，建议持续优化以提升分数。
+{% endif %}
