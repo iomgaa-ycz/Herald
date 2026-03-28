@@ -194,8 +194,9 @@ def _build_runtime_context() -> dict[str, object]:
                 }
             },
         },
+        "data_profile": "训练集 100 行，8 个数值列，2 个类别列，标签列为 target，无明显缺失值。",
         "recent_error": "",
-        "template_content": "",
+        "template_content": "def build_model(config: dict[str, object]) -> object:\n    return None\n",
     }
 
 
@@ -368,5 +369,7 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
     assert "draft_plan" in str(llm.calls[0]["prompt"])
     assert "draft_execute" in str(llm.calls[1]["prompt"])
     assert "draft_summarize" in str(llm.calls[2]["prompt"])
+    assert "训练集 100 行" in str(llm.calls[0]["prompt"])
+    assert "训练集 100 行" in str(llm.calls[1]["prompt"])
     assert llm.calls[1]["cwd"] == str(workspace.working_dir)
     assert llm.calls[1]["env"] == {"HERALD_DB_PATH": str(workspace.db_path)}

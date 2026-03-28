@@ -275,6 +275,8 @@ def test_handle_execute_phase_parses_json(tmp_path: Path) -> None:
     assert result["task_spec"]["task_type"] == "tabular"
     assert result["task_spec"]["metric_name"] == "auc"
     assert result["genome_template"] == "tabular"
+    assert result["schema"].task_type == "tabular"
+    assert "def build_model(config: dict[str, object])" in result["template_content"]
     assert solution.metadata["genome_template"] == "tabular"
     assert solution.metadata["schema_task_type"] == "tabular"
 
@@ -350,6 +352,53 @@ def test_handle_summarize_emits_complete() -> None:
     assert len(received_events) == 1
     assert received_events[0].task_name == "feature_extract"
     assert received_events[0].status == "completed"
+
+
+def test_handle_summarize_emits_output_context(tmp_path: Path) -> None:
+    """summarize 事件携带可供 DraftPES 消费的 output_context。"""
+
+    received_events: list[TaskCompleteEvent] = []
+
+    def on_complete(event: TaskCompleteEvent) -> None:
+        received_events.append(event)
+
+    EventBus.get().on(TaskCompleteEvent.EVENT_TYPE, on_complete)
+
+    workspace = _build_workspace(tmp_path)
+    pes = FeatureExtractPES(
+        config=_build_config(),
+        llm=DummyLLM(),
+        workspace=workspace,
+        prompt_manager=DummyPromptManager(),
+    )
+    solution = pes.create_solution(generation=0)
+
+    execute_response = _make_execute_response_text(
+        data_profile="训练集 100 行 10 列，无缺失值",
+    )
+    asyncio.run(
+        pes.handle_phase_response(
+            phase="execute",
+            solution=solution,
+            response=DummyResponse(result=execute_response, turns=[]),
+            parent_solution=None,
+        )
+    )
+    asyncio.run(
+        pes.handle_phase_response(
+            phase="summarize",
+            solution=solution,
+            response=DummyResponse(result="数据分析总结", turns=[]),
+            parent_solution=None,
+        )
+    )
+
+    assert len(received_events) == 1
+    output_context = received_events[0].output_context
+    assert output_context["task_spec"]["task_type"] == "tabular"
+    assert output_context["data_profile"] == "训练集 100 行 10 列，无缺失值"
+    assert output_context["schema"].task_type == "tabular"
+    assert "def build_model(config: dict[str, object])" in output_context["template_content"]
 
 
 def test_run_full_cycle(tmp_path: Path) -> None:

@@ -67,6 +67,7 @@ def _build_draft_context() -> dict[str, Any]:
             "db_path": "/tmp/herald/herald.db",
         },
         "execution_log": "训练完成，得到基线分数。",
+        "data_profile": "训练集 100 行，10 个特征，2 个类别列，无明显缺失值。",
         "recent_error": "无",
         "template_content": "def build_model():\n    pass",
         "allowed_tools": ["Bash", "Read"],
@@ -106,6 +107,10 @@ def test_prompt_manager_can_render_all_draft_templates() -> None:
         prompt = manager.build_prompt("draft", phase, context)
         assert expected_marker in prompt
         assert "全局系统规则" in prompt
+
+    assert "数据概况" in manager.build_prompt("draft", "plan", context)
+    assert "训练集 100 行" in manager.build_prompt("draft", "plan", context)
+    assert "训练集 100 行" in manager.build_prompt("draft", "execute", context)
 
 
 def test_system_context_has_no_overengineering_rule() -> None:
