@@ -20,6 +20,10 @@ class GradingConfig:
     """评分配置。"""
 
     enabled: bool = True
+    competition_id: str | None = None
+    competition_root_dir: str | Path | None = None
+    public_data_dir: str | Path | None = None
+    mlebench_data_dir: str | Path | None = None
     competition_dir: str | Path | None = None
     accepted_statuses: tuple[str, ...] = ("completed", "success")
 
@@ -217,15 +221,55 @@ def _resolve_competition_dir(
 ) -> Path | None:
     """从 config 或 context 中解析竞赛目录。"""
 
-    if config.competition_dir is not None:
-        return Path(config.competition_dir).expanduser().resolve()
+    for value in (
+        config.competition_root_dir,
+        config.public_data_dir,
+        config.competition_dir,
+    ):
+        if value is not None:
+            return Path(value).expanduser().resolve()
 
-    for key in ("competition_dir", "competition_root_dir", "public_data_dir"):
+    for key in ("competition_root_dir", "public_data_dir", "competition_dir"):
         value = _resolve_context_value(context, key)
         if value:
             return Path(value).expanduser().resolve()
 
     return None
+
+
+def _resolve_competition_id(
+    context: object,
+    config: GradingConfig,
+) -> str | None:
+    """优先从显式上下文解析 competition_id。"""
+
+    if config.competition_id:
+        return str(config.competition_id)
+
+    value = _resolve_context_value(context, "competition_id")
+    if value:
+        return str(value)
+
+    competition_dir = _resolve_competition_dir(context, config)
+    if competition_dir is None:
+        return None
+    return infer_competition_id(competition_dir)
+
+
+def _resolve_mlebench_data_dir(
+    context: object,
+    config: GradingConfig,
+) -> Path | None:
+    """优先从显式上下文解析 MLE-Bench data 根目录。"""
+
+    for value in (config.mlebench_data_dir, _resolve_context_value(context, "mlebench_data_dir")):
+        if value:
+            return Path(value).expanduser().resolve()
+
+    competition_dir = _resolve_competition_dir(context, config)
+    if competition_dir is None:
+        return None
+    return infer_data_dir(competition_dir)
 
 
 def _resolve_submission_file_path(context: object) -> Path | None:
@@ -313,14 +357,22 @@ class MLEBenchGradingHook:
             return None
 
         competition_dir = _resolve_competition_dir(context, self.config)
-        if competition_dir is None:
-            logger.debug("competition_dir 缺失，跳过评分: solution_id=%s", solution_id)
+        competition_id = _resolve_competition_id(context, self.config)
+        data_dir = _resolve_mlebench_data_dir(context, self.config)
+        if competition_id is None or data_dir is None:
+            logger.debug(
+                "评分上下文缺失，跳过评分: solution_id=%s, competition_id=%s, data_dir=%s",
+                solution_id,
+                competition_id,
+                data_dir,
+            )
             return None
 
         try:
-            result = grade_solution_submission(
+            result = grade_submission(
                 submission_path=submission_file_path,
-                competition_dir=competition_dir,
+                competition_id=competition_id,
+                data_dir=data_dir,
             )
         except ValueError:
             logger.exception(
@@ -342,12 +394,21 @@ class MLEBenchGradingHook:
 def create_grading_hook(
     enabled: bool = True,
     competition_dir: str | Path | None = None,
+    *,
+    competition_id: str | None = None,
+    competition_root_dir: str | Path | None = None,
+    public_data_dir: str | Path | None = None,
+    mlebench_data_dir: str | Path | None = None,
 ) -> MLEBenchGradingHook:
     """创建可复用的 MLE-Bench 评分 hook。"""
 
     return MLEBenchGradingHook(
         GradingConfig(
             enabled=enabled,
+            competition_id=competition_id,
+            competition_root_dir=competition_root_dir,
+            public_data_dir=public_data_dir,
+            mlebench_data_dir=mlebench_data_dir,
             competition_dir=competition_dir,
         )
     )
