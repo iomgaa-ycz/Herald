@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.events.bus import EventBus
+from core.events.types import TaskCompleteEvent
 from core.pes.base import BasePES
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
@@ -59,6 +61,15 @@ class DraftPES(BasePES):
             solution.summarize_insight = response_text
             solution.status = "completed"
             solution.finished_at = utc_now_iso()
+            # 发出任务完成事件
+            EventBus.get().emit(
+                TaskCompleteEvent(
+                    task_name=self.config.name,
+                    pes_instance_id=self.instance_id,
+                    status="completed",
+                    solution_id=solution.id,
+                )
+            )
         else:
             raise ValueError(f"不支持的 DraftPES phase: {phase}")
 

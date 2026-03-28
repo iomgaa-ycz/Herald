@@ -8,6 +8,7 @@ import sys
 from core.database.herald_db import HeraldDB
 from core.events import EventBus, setup_task_dispatcher
 from core.load_config import ConfigManager
+from core.scheduler import Scheduler
 from core.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,15 @@ def main() -> None:
     EventBus.get()
     setup_task_dispatcher()
     logger.info("事件流系统已初始化")
+
+    # Phase 5: 启动调度器
+    scheduler = Scheduler(
+        competition_dir=config.run.competition_dir,
+        max_tasks=config.run.max_tasks,
+    )
+    logger.info("调度器已启动: max_tasks=%d", config.run.max_tasks)
+    scheduler.run()
+    logger.info("调度器执行完成")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from core.events.types import (
     Event,
     EventTypes,
     PESCommandEvent,
+    TaskCompleteEvent,
     TaskDispatchEvent,
     TaskExecuteEvent,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "EventTypes",
     "Event",
     "PESCommandEvent",
+    "TaskCompleteEvent",
     "TaskDispatchEvent",
     "TaskExecuteEvent",
     "TaskDispatcher",

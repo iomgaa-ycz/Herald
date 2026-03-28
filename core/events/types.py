@@ -16,6 +16,7 @@ class EventTypes:
     PES_STOP = "pes:stop"
     TASK_DISPATCH = "task:dispatch"
     TASK_EXECUTE = "task:execute"
+    TASK_COMPLETE = "task:complete"
 
 
 @dataclass(slots=True)
@@ -59,3 +60,16 @@ class TaskExecuteEvent(Event):
     agent: AgentProfile | None = None
     generation: int = 0
     context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class TaskCompleteEvent(Event):
+    """任务完成事件。"""
+
+    EVENT_TYPE: ClassVar[str] = EventTypes.TASK_COMPLETE
+    type: str = EventTypes.TASK_COMPLETE
+    timestamp: float = field(default_factory=time.time)
+    task_name: str = ""
+    pes_instance_id: str = ""
+    status: str = ""  # "completed" | "failed"
+    solution_id: str = ""
