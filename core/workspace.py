@@ -27,6 +27,7 @@ workspace/
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ class Workspace:
         self.best_dir = self.root / "best"
         self.database_dir = self.root / "database"
         self.db_path = self.database_dir / "herald.db"
+        self.metadata_path = self.root / "metadata.json"
 
     def create(self, competition_dir: str | Path) -> Workspace:
         """创建工作空间目录结构并链接数据。
@@ -139,14 +141,40 @@ class Workspace:
         tmp_submission.replace(self.best_dir / "submission.csv")
 
         if metadata:
-            import json
-
             meta_tmp = self.best_dir / ".metadata.json.tmp"
             meta_tmp.write_text(
                 json.dumps(metadata, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             meta_tmp.replace(self.best_dir / "metadata.json")
+
+    def write_run_metadata(self, metadata: dict[str, Any]) -> Path:
+        """写入 run 级 metadata.json。"""
+
+        metadata_tmp_path = self.root / ".metadata.json.tmp"
+        metadata_tmp_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        metadata_tmp_path.replace(self.metadata_path)
+        return self.metadata_path
+
+    def read_run_metadata(self) -> dict[str, Any] | None:
+        """读取 run 级 metadata.json。"""
+
+        if not self.metadata_path.exists():
+            return None
+        return json.loads(self.metadata_path.read_text(encoding="utf-8"))
+
+    def update_run_finished_at(self, finished_at: str) -> None:
+        """回写 run 级 metadata.json 的完成时间。"""
+
+        metadata = self.read_run_metadata()
+        if metadata is None:
+            return
+
+        metadata["finished_at"] = finished_at
+        self.write_run_metadata(metadata)
 
     def get_working_solution_path(self) -> Path:
         """获取当前工作 solution.py 路径。"""

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import sys
 from dataclasses import asdict
@@ -116,38 +115,6 @@ def build_run_metadata(
     }
 
 
-def write_run_metadata(
-    workspace: Workspace,
-    metadata: dict[str, Any],
-) -> Path:
-    """写入 run 级 metadata.json。"""
-
-    metadata_path = workspace.root / "metadata.json"
-    metadata_path.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return metadata_path
-
-
-def update_run_metadata_finished_at(
-    workspace: Workspace,
-    finished_at: str,
-) -> None:
-    """回写 run 完成时间。"""
-
-    metadata_path = workspace.root / "metadata.json"
-    if not metadata_path.exists():
-        return
-
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["finished_at"] = finished_at
-    metadata_path.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
 def main() -> None:
     """Herald 主流程：加载配置 → 创建工作空间 → 初始化数据库 → 初始化事件流系统。"""
     logging.basicConfig(
@@ -185,7 +152,7 @@ def main() -> None:
         run_id=run_id,
         started_at=started_at,
     )
-    metadata_path = write_run_metadata(workspace, metadata)
+    metadata_path = workspace.write_run_metadata(metadata)
     logger.info("run 元数据已写入: %s", metadata_path)
 
     # Phase 5: 装配 FeatureExtractPES + DraftPES
@@ -222,7 +189,7 @@ def main() -> None:
         scheduler.run()
         logger.info("调度器执行完成")
     finally:
-        update_run_metadata_finished_at(workspace, utc_now_iso())
+        workspace.update_run_finished_at(utc_now_iso())
         logger.info("run 元数据已回写 finished_at")
 
 

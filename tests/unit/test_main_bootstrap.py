@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from config.classconfig.herald import HeraldConfig
 from config.classconfig.llm import LLMConfig
@@ -131,11 +135,7 @@ def test_bootstrap_feature_extract_pes_registers_instance(tmp_path: Path) -> Non
 def test_run_metadata_file_can_be_written_and_updated(tmp_path: Path) -> None:
     """run 级 metadata.json 可写入并回写 finished_at。"""
 
-    from core.main import (
-        build_run_metadata,
-        update_run_metadata_finished_at,
-        write_run_metadata,
-    )
+    from core.main import build_run_metadata
 
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
@@ -164,18 +164,209 @@ def test_run_metadata_file_can_be_written_and_updated(tmp_path: Path) -> None:
         run_id="run-001",
         started_at="2026-03-28T00:00:00+00:00",
     )
-    metadata_path = write_run_metadata(workspace, metadata)
+    metadata_path = workspace.write_run_metadata(metadata)
 
     assert metadata_path.exists()
-    text = metadata_path.read_text(encoding="utf-8")
-    assert '"run_id": "run-001"' in text
-    assert '"finished_at": null' in text
+    written_metadata = workspace.read_run_metadata()
+    assert written_metadata is not None
+    assert written_metadata["run_id"] == "run-001"
+    assert written_metadata["finished_at"] is None
 
-    update_run_metadata_finished_at(
-        workspace=workspace,
-        finished_at="2026-03-28T00:10:00+00:00",
+    workspace.update_run_finished_at("2026-03-28T00:10:00+00:00")
+
+    updated_metadata = workspace.read_run_metadata()
+    assert updated_metadata is not None
+    assert updated_metadata["competition_id"] == "competition"
+    assert updated_metadata["finished_at"] == "2026-03-28T00:10:00+00:00"
+
+
+def test_build_run_metadata_contains_required_fields(tmp_path: Path) -> None:
+    """run 元数据快照包含 TD 要求的最小字段集。"""
+
+    from core.main import build_run_metadata
+
+    competition_dir = tmp_path / "competition"
+    competition_dir.mkdir(parents=True, exist_ok=True)
+    (competition_dir / "train.csv").write_text("id,label\n1,0\n", encoding="utf-8")
+
+    workspace_root = tmp_path / "workspace"
+    workspace = Workspace(workspace_root)
+    workspace.create(competition_dir)
+    config = HeraldConfig(
+        llm=LLMConfig(
+            model="dummy-model",
+            max_tokens=2048,
+            max_turns=3,
+            permission_mode="bypassPermissions",
+        ),
+        run=RunConfig(
+            workspace_dir=str(workspace_root),
+            competition_dir=str(competition_dir),
+            max_tasks=2,
+        ),
     )
 
-    updated_text = metadata_path.read_text(encoding="utf-8")
-    assert '"competition_id": "competition"' in updated_text
-    assert '"finished_at": "2026-03-28T00:10:00+00:00"' in updated_text
+    metadata = build_run_metadata(
+        config=config,
+        workspace=workspace,
+        run_id="run-001",
+        started_at="2026-03-28T00:00:00+00:00",
+    )
+
+    expected_keys = {
+        "run_id",
+        "competition_id",
+        "competition_root_dir",
+        "public_data_dir",
+        "workspace_dir",
+        "config_snapshot",
+        "started_at",
+        "finished_at",
+    }
+
+    assert expected_keys.issubset(metadata.keys())
+    assert metadata["run_id"] == "run-001"
+    assert metadata["competition_id"] == "competition"
+    assert metadata["finished_at"] is None
+
+
+@dataclass(slots=True)
+class _StubPES:
+    """测试 main 注入 run_id 的最小 PES 桩。"""
+
+    instance_id: str
+    runtime_context: dict[str, Any]
+
+
+class _StubScheduler:
+    """记录初始化参数的最小 Scheduler 桩。"""
+
+    last_instance: _StubScheduler | None = None
+
+    def __init__(
+        self,
+        competition_dir: str,
+        max_tasks: int = 1,
+        task_name: str = "draft",
+        agent_name: str = "kaggle_master",
+        context: dict[str, Any] | None = None,
+        task_stages: list[tuple[str, int]] | None = None,
+    ) -> None:
+        self.competition_dir = competition_dir
+        self.max_tasks = max_tasks
+        self.task_name = task_name
+        self.agent_name = agent_name
+        self.context = context or {}
+        self.task_stages = task_stages
+        self.run_called = False
+        _StubScheduler.last_instance = self
+
+    def _resolve_task_stages(self) -> list[tuple[str, int]]:
+        """返回 stage 配置，兼容 main 中的日志调用。"""
+
+        if self.task_stages is not None:
+            return list(self.task_stages)
+        return [(self.task_name, self.max_tasks)]
+
+    def run(self) -> None:
+        """标记调度器已运行。"""
+
+        self.run_called = True
+
+
+def test_main_injects_shared_run_id_into_runtime_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`main()` 会把同一个 run_id 注入两个 PES 与调度器。"""
+
+    import core.main as main_module
+
+    competition_dir = tmp_path / "competition"
+    competition_dir.mkdir(parents=True, exist_ok=True)
+    (competition_dir / "train.csv").write_text("id,label\n1,0\n", encoding="utf-8")
+
+    workspace_root = tmp_path / "workspace"
+    config = HeraldConfig(
+        llm=LLMConfig(
+            model="dummy-model",
+            max_tokens=2048,
+            max_turns=3,
+            permission_mode="bypassPermissions",
+        ),
+        run=RunConfig(
+            workspace_dir=str(workspace_root),
+            competition_dir=str(competition_dir),
+            max_tasks=2,
+        ),
+    )
+
+    captured_pes: dict[str, _StubPES] = {}
+
+    class _StubConfigManager:
+        def parse(self) -> HeraldConfig:
+            return config
+
+    def _stub_bootstrap_feature_extract_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        pes = _StubPES(
+            instance_id="feature_extract-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+        captured_pes["feature_extract"] = pes
+        return pes
+
+    def _stub_bootstrap_draft_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        pes = _StubPES(
+            instance_id="draft-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+        captured_pes["draft"] = pes
+        return pes
+
+    timestamps = iter(
+        [
+            "2026-03-28T00:00:00+00:00",
+            "2026-03-28T00:10:00+00:00",
+        ]
+    )
+
+    monkeypatch.setattr(main_module, "ConfigManager", _StubConfigManager)
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_feature_extract_pes",
+        _stub_bootstrap_feature_extract_pes,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_draft_pes",
+        _stub_bootstrap_draft_pes,
+    )
+    monkeypatch.setattr(main_module, "Scheduler", _StubScheduler)
+    monkeypatch.setattr(main_module, "setup_task_dispatcher", lambda: None)
+    monkeypatch.setattr(main_module, "create_run_id", lambda: "run-001")
+    monkeypatch.setattr(main_module, "utc_now_iso", lambda: next(timestamps))
+
+    main_module.main()
+
+    assert captured_pes["feature_extract"].runtime_context["run_id"] == "run-001"
+    assert captured_pes["draft"].runtime_context["run_id"] == "run-001"
+    assert _StubScheduler.last_instance is not None
+    assert _StubScheduler.last_instance.context["run_id"] == "run-001"
+    assert _StubScheduler.last_instance.run_called is True
+
+    workspace = Workspace(workspace_root)
+    metadata = workspace.read_run_metadata()
+    assert metadata is not None
+    assert metadata["run_id"] == "run-001"
+    assert metadata["started_at"] == "2026-03-28T00:00:00+00:00"
+    assert metadata["finished_at"] == "2026-03-28T00:10:00+00:00"
