@@ -73,3 +73,4 @@ class TaskCompleteEvent(Event):
     pes_instance_id: str = ""
     status: str = ""  # "completed" | "failed"
     solution_id: str = ""
+    output_context: dict[str, Any] = field(default_factory=dict)
