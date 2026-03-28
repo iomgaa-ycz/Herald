@@ -30,8 +30,9 @@ Herald2 当前的阶段性目标是：
 
 因此本文档只约束当前阶段真正需要的 Harness 能力：
 
-- `main.py -> Scheduler -> TaskDispatcher -> DraftPES.run()` 主链路
-- `Plan / Execute / Summarize` 三阶段的记录与回放
+- `main.py -> Scheduler -> TaskDispatcher -> FeatureExtractPES.run() -> DraftPES.run()` 主链路
+- `FeatureExtractPES` 的数据分析、TaskSpec 生成、GenomeSchema 模板选择
+- `DraftPES` 的 `Plan / Execute / Summarize` 三阶段的记录与回放
 - `solution.py`、`submission.csv`、执行日志与评分结果的落盘
 - 基于真实数据和真实运行结果的测试体系
 
@@ -93,10 +94,13 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 | 对象 | 必须记录 | 记录形式 | 观测方式 |
 |---|---|---|---|
 | Run | `run_id`、配置快照、竞赛目录、工作空间目录、启动/结束时间 | 日志 + 元数据文件 | 读 `logs/`、看 `metadata.json` |
-| Scheduler / Event | dispatch / execute / complete 的时间、状态、solution_id、pes_id | 日志 | `tail -f` 实时观察 |
-| Plan Phase | prompt、agent profile、模型、tokens、latency、原始输出、plan 摘要 | `llm_calls` + 日志 | 查 DB / 读日志 |
-| Execute Phase | 原始输出、提取出的代码块、`solution.py`、执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
-| Summarize Phase | summarize prompt、原始输出、最终 insight、下轮建议 | `llm_calls` + 报告文件 | 查 DB / 读报告 |
+| Scheduler / Event | dispatch / execute / complete 的时间、状态、solution_id、pes_id、task_stages 进度 | 日志 | `tail -f` 实时观察 |
+| FeatureExtract Plan | 竞赛描述分析策略、数据探索计划 | `llm_calls` + 日志 | 查 DB / 读日志 |
+| FeatureExtract Execute | 数据探索命令与输出、TaskSpec JSON、data_profile 报告、GenomeSchema 模板选择 | `llm_calls` + `working/task_spec.json` + `working/data_profile.md` | 查 DB / 看 `working/` |
+| FeatureExtract Summarize | 数据特征总结、关键发现、建模建议 | `llm_calls` + 日志 | 查 DB / 读日志 |
+| Draft Plan Phase | prompt、agent profile、模型、tokens、latency、原始输出、plan 摘要 | `llm_calls` + 日志 | 查 DB / 读日志 |
+| Draft Execute Phase | 原始输出、提取出的代码块、`solution.py`、执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
+| Draft Summarize Phase | summarize prompt、原始输出、最终 insight、下轮建议 | `llm_calls` + 报告文件 | 查 DB / 读报告 |
 | 外部评分 | `test_score`、方向、奖牌、阈值、是否有效提交 | 独立评分结果 + 日志 + solution metadata | 看评分报告 / 查结果 |
 
 ### 4.3 记录通道职责
@@ -121,10 +125,12 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 
 在 MVP 阶段，以下记录项必须先接通：
 
-- `solutions`
+- `solutions`（含 FeatureExtractPES 和 DraftPES 两类 solution）
 - `llm_calls`
 - `code_snapshots`
 - `exec_logs`
+- `working/task_spec.json`（FeatureExtractPES 产出）
+- `working/data_profile.md`（FeatureExtractPES 产出）
 - `working/solution.py`
 - `working/submission.csv`
 - `val_metric_value`
@@ -216,6 +222,14 @@ tests/cases/replays/
 
 当前阶段必须至少积累以下回放类型：
 
+**FeatureExtractPES 回放：**
+
+- 成功识别 tabular 任务并生成完整 TaskSpec 的 case
+- 成功生成 data_profile 的 case
+- 竞赛描述缺失关键信息的降级 case
+
+**DraftPES 回放：**
+
 - 成功生成可评分 submission 的 case
 - 无代码块 case
 - Python 语法错误 case
@@ -237,8 +251,10 @@ tests/cases/replays/
 当前阶段需要的单元测试包括：
 
 - `Workspace` 能正确链接 `prepared/public`
+- `FeatureExtractPES` 能从 execute 输出中解析 TaskSpec JSON 和 data_profile
+- `GenomeSchema` 模板加载能根据 task_type 返回正确的模板（tabular / generic）
 - `TaskSpec` 能从真实 `description.md` 抽取任务目标与 metric
-- `PromptManager` 能对真实 `task_spec/schema/workspace` 正常渲染
+- `PromptManager` 能对真实 `task_spec/schema/workspace/data_profile` 正常渲染
 - execute 输出解析器能从真实 `execute_raw.txt` 提取代码块
 - submission 校验器能对真实 `sample_submission.csv` 做格式判定
 - `solutions / llm_calls / exec_logs / code_snapshots` 能正确 roundtrip
@@ -251,7 +267,9 @@ tests/cases/replays/
 
 当前阶段的模块测试包括：
 
-- `DraftPES.plan` 的输出是否覆盖任务目标与约束
+- `FeatureExtractPES.execute` 的输出是否包含有效 TaskSpec 和 data_profile
+- `FeatureExtractPES` 是否能正确选择 GenomeSchema 模板（tabular vs generic）
+- `DraftPES.plan` 的输出是否覆盖任务目标与约束（含 data_profile 消费验证）
 - `DraftPES.execute` 的输出是否能真正落成 `solution.py`
 - `DraftPES.summarize` 的结论是否忠实于执行日志
 
@@ -261,7 +279,8 @@ tests/cases/replays/
 
 当前阶段的核心集成测试包括：
 
-- `main.py -> Scheduler -> TaskDispatcher -> DraftPES.run()`
+- `main.py -> Scheduler(task_stages) -> FeatureExtractPES.run() -> DraftPES.run()` 全链路
+- `FeatureExtractPES` 产出的 TaskSpec / data_profile 是否成功注入 DraftPES context
 - 一次 run 结束后 DB、workspace、日志、submission 是否同步存在
 - 成功执行后能否补采 `test_score`
 
