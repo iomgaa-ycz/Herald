@@ -269,8 +269,8 @@ DraftPES.run()
 | `core/pes/draft.py` | Draft 操作的最小落地 | 已实现，但执行能力仍很薄 |
 | `core/pes/config.py` | PES YAML 配置加载 | 已实现 |
 | `core/pes/types.py` | `PESSolution` 运行期状态模型 | 已实现 |
-| `core/pes/schema.py` | `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型 + 模板加载 | 已实现类型，模板加载待实现 |
-| `config/genome_templates/` | GenomeSchema 代码模板（tabular.py / generic.py） | 待实现 |
+| `core/pes/schema.py` | `TaskSpec` / `SlotContract` / `GenomeSchema` 最小类型 + 模板加载 | 已实现（含模板加载 MVP） |
+| `config/genome_templates/` | GenomeSchema 代码模板（tabular.py / generic.py） | 已实现（tabular / generic 模板） |
 | `core/agent/` | Agent profile 注册与加载 | 已实现，当前仅 prompt profile |
 | `core/prompts/` | 首次 Prompt 装配 | 已实现 |
 | `config/prompts/templates/` | `draft_plan/execute/summarize` 模板 | 已实现 |

@@ -467,7 +467,7 @@ class BasePES(ABC):
 
 ## 4.5 FeatureExtractPES 具体实现层
 
-**状态**: ⬜ 待实现
+**状态**: ✅ MVP 已实现
 **层级**: 前置数据分析 PES
 **前置依赖**: `BasePES`、`Workspace`、`HeraldDB`
 **测试文件**: `tests/unit/test_feature_extract_pes.py`
@@ -697,7 +697,7 @@ class PromptManager:
 
 ## 4.8 GenomeSchema 模板加载层
 
-**状态**: ⬜ 待实现
+**状态**: ✅ MVP 已实现
 **层级**: 任务规格层
 **前置依赖**: `config/genome_templates/`
 **测试文件**: `tests/unit/test_genome_template.py`
@@ -773,7 +773,7 @@ def fixed_function():
 
 - `load_genome_template("tabular")` 返回含 4 个 slot 的 GenomeSchema + 非空 template_content
 - `load_genome_template("unknown_type")` 返回 generic 模板
-- 模板代码中的 GENE 标记可被正确解析
+- 模板代码中的 GENE 标记可被稳定识别
 
 ---
 
@@ -1092,7 +1092,7 @@ ConfigManager
 
 ### 6.1 Task 1：实现 FeatureExtractPES
 
-**状态**: ⬜ 待实现
+**状态**: ✅ MVP 已实现
 **目标**: 实现前置数据分析 PES，能分析竞赛数据并动态生成 TaskSpec + data_profile + GenomeSchema 选择。
 
 **任务是什么**
@@ -1134,7 +1134,7 @@ ConfigManager
 
 ### 6.2 Task 2：实现 GenomeSchema 模板体系
 
-**状态**: ⬜ 待实现
+**状态**: ✅ MVP 已实现
 **目标**: 为不同任务类型提供代码模板骨架，DraftPES 在生成代码时以此为基础。
 
 **任务是什么**
@@ -1163,7 +1163,7 @@ ConfigManager
 
 - `load_genome_template("tabular")` 返回含 4 个 slot 的 GenomeSchema + 非空 template_content
 - `load_genome_template("unknown")` 返回 generic 模板
-- tabular 模板中 GENE 标记区域可被识别
+- tabular 模板中 GENE 标记区域可被稳定识别
 
 ### 6.3 Task 3：Scheduler 支持 task_stages + 数据传递
 
