@@ -68,3 +68,85 @@ def test_exec_log_roundtrip_with_real_sqlite(tmp_path: Path) -> None:
     assert logs[0]["exit_code"] == 0
     assert logs[0]["duration_ms"] == 12.5
     assert logs[0]["metrics"] == {"metric_name": "auc", "metric_value": 0.7}
+
+
+def test_solution_artifact_paths_roundtrip_with_real_sqlite(tmp_path: Path) -> None:
+    """solution 工件路径更新后可被正确读回。"""
+
+    db = HeraldDB(str(tmp_path / "herald.db"))
+    solution = PESSolution(
+        id="solution-001",
+        operation="draft",
+        generation=0,
+        status="running",
+        created_at=utc_now_iso(),
+        parent_ids=[],
+        lineage="solution",
+        run_id="run-001",
+    )
+    db.insert_solution(solution.to_record())
+    db.update_solution_artifacts(
+        solution_id=solution.id,
+        workspace_dir="/tmp/workspace/working",
+        solution_file_path="/tmp/workspace/working/solution.py",
+        submission_file_path="/tmp/workspace/working/submission.csv",
+    )
+
+    row = db.get_solution(solution.id)
+
+    assert row is not None
+    assert row["workspace_dir"] == "/tmp/workspace/working"
+    assert row["solution_file_path"] == "/tmp/workspace/working/solution.py"
+    assert row["submission_file_path"] == "/tmp/workspace/working/submission.csv"
+
+
+def test_get_best_fitness_filters_by_run_id_and_excludes_current_solution(
+    tmp_path: Path,
+) -> None:
+    """best fitness 查询支持 run 过滤与排除当前 solution。"""
+
+    db = HeraldDB(str(tmp_path / "herald.db"))
+    created_at = utc_now_iso()
+
+    solution_a = PESSolution(
+        id="solution-a",
+        operation="draft",
+        generation=0,
+        status="completed",
+        created_at=created_at,
+        parent_ids=[],
+        lineage="a",
+        run_id="run-001",
+        fitness=0.91,
+    )
+    solution_b = PESSolution(
+        id="solution-b",
+        operation="draft",
+        generation=0,
+        status="completed",
+        created_at=created_at,
+        parent_ids=[],
+        lineage="b",
+        run_id="run-001",
+        fitness=0.85,
+    )
+    solution_c = PESSolution(
+        id="solution-c",
+        operation="draft",
+        generation=0,
+        status="completed",
+        created_at=created_at,
+        parent_ids=[],
+        lineage="c",
+        run_id="run-002",
+        fitness=0.99,
+    )
+
+    db.insert_solution(solution_a.to_record())
+    db.insert_solution(solution_b.to_record())
+    db.insert_solution(solution_c.to_record())
+
+    assert db.get_best_fitness(run_id="run-001") == 0.91
+    assert (
+        db.get_best_fitness(run_id="run-001", exclude_solution_id="solution-a") == 0.85
+    )

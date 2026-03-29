@@ -66,6 +66,7 @@ class DraftPES(BasePES):
             solution.summarize_insight = response_text
             solution.status = "completed"
             solution.finished_at = utc_now_iso()
+            self._archive_completed_solution(solution)
             self._emit_task_complete_event(solution=solution, status="completed")
         else:
             raise ValueError(f"不支持的 DraftPES phase: {phase}")
@@ -899,3 +900,93 @@ class DraftPES(BasePES):
         solution.metadata["sample_submission_path"] = result.get(
             "sample_submission_path"
         )
+
+    def _archive_completed_solution(self, solution: PESSolution) -> None:
+        """在成功完成后归档版本，并在更优时提升 best。"""
+
+        version_dir = self._archive_successful_solution(solution)
+        if version_dir is None:
+            return
+
+        promoted = self._maybe_promote_best(solution=solution, version_dir=version_dir)
+        solution.metadata["best_promoted"] = promoted
+
+    def _archive_successful_solution(self, solution: PESSolution) -> Path | None:
+        """将当前 working 工件保存到 history/。"""
+
+        if self.workspace is None:
+            return None
+
+        save_version = getattr(self.workspace, "save_version", None)
+        read_solution = getattr(self.workspace, "read_working_solution", None)
+        read_submission = getattr(self.workspace, "read_working_submission", None)
+        if not callable(save_version) or not callable(read_solution) or not callable(
+            read_submission
+        ):
+            return None
+
+        code = read_solution(self.config.solution_file_name)
+        submission = read_submission(self.config.submission_file_name)
+        version_dir = save_version(
+            code=code,
+            submission=submission,
+            generation=solution.generation,
+            solution_id=solution.id,
+        )
+        solution.metadata["version_dir"] = str(version_dir)
+        return Path(version_dir)
+
+    def _maybe_promote_best(
+        self,
+        solution: PESSolution,
+        version_dir: Path,
+    ) -> bool:
+        """仅在当前解更优时更新 best/。"""
+
+        if solution.status != "completed":
+            return False
+        if solution.fitness is None:
+            return False
+        if solution.metadata.get("submission_validated") is not True:
+            return False
+        if self.workspace is None:
+            return False
+
+        promote_best = getattr(self.workspace, "promote_best", None)
+        if not callable(promote_best):
+            return False
+
+        best_fitness = self._get_current_best_fitness(solution)
+        if best_fitness is not None and solution.fitness <= best_fitness:
+            return False
+
+        metadata = self._build_best_metadata(solution=solution, version_dir=version_dir)
+        promote_best(version_dir=version_dir, metadata=metadata)
+        return True
+
+    def _get_current_best_fitness(self, solution: PESSolution) -> float | None:
+        """读取当前 run 中除自身外的最高 fitness。"""
+
+        if self.db is None or not hasattr(self.db, "get_best_fitness"):
+            return None
+
+        return self.db.get_best_fitness(
+            run_id=solution.run_id,
+            exclude_solution_id=solution.id,
+        )
+
+    def _build_best_metadata(
+        self,
+        solution: PESSolution,
+        version_dir: Path,
+    ) -> dict[str, Any]:
+        """构造 best/metadata.json。"""
+
+        return {
+            "solution_id": solution.id,
+            "generation": solution.generation,
+            "fitness": solution.fitness,
+            "run_id": solution.run_id,
+            "version_dir": str(version_dir),
+            "promoted_at": utc_now_iso(),
+        }

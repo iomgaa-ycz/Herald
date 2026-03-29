@@ -109,6 +109,26 @@ def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
             )
 
 
+def _write_case_runtime_artifacts_with_metric(
+    case_dir: Path,
+    working_dir: Path,
+    metric_value: float,
+) -> None:
+    """写入回放工件，并覆写 metrics.json 的分数。"""
+
+    _write_case_runtime_artifacts(case_dir=case_dir, working_dir=working_dir)
+    (working_dir / "metrics.json").write_text(
+        json.dumps(
+            {
+                "val_metric_name": "accuracy",
+                "val_metric_value": metric_value,
+                "val_metric_direction": "max",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     """构造竞赛目录、工作空间与数据库。"""
 
@@ -178,7 +198,16 @@ def test_draft_pes_runtime_success_backfills_fitness_and_submission_validation(
     assert solution_row is not None
     assert solution_row["status"] == "completed"
     assert solution_row["fitness"] == 0.81
+    assert Path(solution_row["solution_file_path"]).exists()
+    assert Path(solution_row["submission_file_path"]).exists()
     assert workspace.read_working_submission() == "id,target\n1,0.9\n"
+    version_dir = Path(str(solution.metadata["version_dir"]))
+    assert version_dir.exists()
+    assert (version_dir / "solution.py").exists()
+    assert (version_dir / "submission.csv").exists()
+    assert workspace.read_best_metadata() is not None
+    assert workspace.read_best_metadata()["fitness"] == 0.81
+    assert solution.metadata["best_promoted"] is True
 
 
 def test_draft_pes_runtime_invalid_submission_marks_failed(tmp_path: Path) -> None:
@@ -226,3 +255,81 @@ def test_draft_pes_runtime_invalid_submission_marks_failed(tmp_path: Path) -> No
     assert "submission.csv 校验失败" in solution.metadata["failure_reason"]
     assert solution_row is not None
     assert solution_row["status"] == "failed"
+
+
+def test_draft_pes_runtime_lower_fitness_does_not_override_best(tmp_path: Path) -> None:
+    """同一 run 中更低 fitness 的解不会覆盖 best。"""
+
+    replay = _load_replay_case("draft_success_tabular_v1")
+    competition_dir, workspace, db = _build_runtime(tmp_path)
+
+    def writer_high(working_dir: Path) -> None:
+        _write_case_runtime_artifacts_with_metric(
+            case_dir=Path(replay["case_dir"]),
+            working_dir=working_dir,
+            metric_value=0.91,
+        )
+
+    pes_high = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=ReplayLLM(
+            responses=["计划完成", "执行完成", "总结完成"],
+            turns=replay["turns"],
+            execute_writer=writer_high,
+        ),
+        db=db,
+        workspace=workspace,
+        runtime_context={
+            "competition_dir": str(competition_dir),
+            "run_id": "run-001",
+            "task_spec": {
+                "metric_name": "accuracy",
+                "metric_direction": "max",
+            },
+        },
+        prompt_manager=DummyPromptManager(),
+    )
+    high_solution = asyncio.run(
+        pes_high.run(agent_profile=_build_agent_profile(), generation=0)
+    )
+
+    best_metadata_after_high = workspace.read_best_metadata()
+    assert best_metadata_after_high is not None
+    assert best_metadata_after_high["solution_id"] == high_solution.id
+    assert best_metadata_after_high["fitness"] == 0.91
+
+    def writer_low(working_dir: Path) -> None:
+        _write_case_runtime_artifacts_with_metric(
+            case_dir=Path(replay["case_dir"]),
+            working_dir=working_dir,
+            metric_value=0.52,
+        )
+
+    pes_low = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=ReplayLLM(
+            responses=["计划完成", "执行完成", "总结完成"],
+            turns=replay["turns"],
+            execute_writer=writer_low,
+        ),
+        db=db,
+        workspace=workspace,
+        runtime_context={
+            "competition_dir": str(competition_dir),
+            "run_id": "run-001",
+            "task_spec": {
+                "metric_name": "accuracy",
+                "metric_direction": "max",
+            },
+        },
+        prompt_manager=DummyPromptManager(),
+    )
+    low_solution = asyncio.run(
+        pes_low.run(agent_profile=_build_agent_profile(), generation=1)
+    )
+
+    best_metadata_after_low = workspace.read_best_metadata()
+    assert best_metadata_after_low is not None
+    assert best_metadata_after_low["solution_id"] == high_solution.id
+    assert best_metadata_after_low["fitness"] == 0.91
+    assert low_solution.metadata["best_promoted"] is False

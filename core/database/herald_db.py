@@ -170,6 +170,18 @@ class HeraldDB:
     def get_solutions_by_generation(self, generation: int) -> list[dict]:
         return self.solutions.get_by_generation(generation)
 
+    def get_best_fitness(
+        self,
+        run_id: str | None = None,
+        exclude_solution_id: str | None = None,
+    ) -> float | None:
+        """获取最高 fitness。"""
+
+        return self.solutions.get_best_fitness(
+            run_id=run_id,
+            exclude_solution_id=exclude_solution_id,
+        )
+
     def get_lineage_chain(self, solution_id: str) -> list[dict]:
         return self.lineage.get_lineage_chain(solution_id)
 

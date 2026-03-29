@@ -148,6 +148,14 @@ class Workspace:
             )
             meta_tmp.replace(self.best_dir / "metadata.json")
 
+    def read_best_metadata(self) -> dict[str, Any] | None:
+        """读取 best/metadata.json。"""
+
+        metadata_path = self.best_dir / "metadata.json"
+        if not metadata_path.exists():
+            return None
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+
     def write_run_metadata(self, metadata: dict[str, Any]) -> Path:
         """写入 run 级 metadata.json。"""
 

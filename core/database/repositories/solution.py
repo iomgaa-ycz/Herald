@@ -141,6 +141,38 @@ class SolutionRepository(BaseRepository):
                     pass
         return rows
 
+    def get_best_fitness(
+        self,
+        run_id: str | None = None,
+        exclude_solution_id: str | None = None,
+    ) -> float | None:
+        """获取有效 solution 中的最高 fitness。"""
+
+        conditions = [
+            "status IN ('completed', 'success')",
+            "fitness IS NOT NULL",
+        ]
+        params: list[Any] = []
+
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            params.append(run_id)
+        if exclude_solution_id is not None:
+            conditions.append("id != ?")
+            params.append(exclude_solution_id)
+
+        row = self._fetchone(
+            f"SELECT MAX(fitness) AS best_fitness FROM solutions WHERE {' AND '.join(conditions)}",
+            tuple(params),
+        )
+        if row is None:
+            return None
+
+        value = row.get("best_fitness")
+        if value is None:
+            return None
+        return float(value)
+
     def list_active(self) -> list[dict]:
         rows = self._fetchall(
             """
