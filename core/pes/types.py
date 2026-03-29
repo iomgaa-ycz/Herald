@@ -6,7 +6,45 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
 
-def _to_plain_data(value: Any) -> Any:
+def _get_metric_field(
+    metrics: dict[str, Any] | None,
+    canonical_key: str,
+    legacy_key: str,
+) -> object | None:
+    """从指标字典中按新旧键顺序读取字段。"""
+
+    if metrics is None:
+        return None
+    if canonical_key in metrics:
+        return metrics.get(canonical_key)
+    return metrics.get(legacy_key)
+
+
+def _build_metric_aliases(metrics: dict[str, Any] | None) -> dict[str, Any] | None:
+    """为 Prompt 和持久化构造带新旧别名的指标字典。"""
+
+    if metrics is None:
+        return None
+
+    metric_name = _get_metric_field(metrics, "val_metric_name", "metric_name")
+    metric_value = _get_metric_field(metrics, "val_metric_value", "metric_value")
+    metric_direction = _get_metric_field(
+        metrics,
+        "val_metric_direction",
+        "metric_direction",
+    )
+
+    aliased_metrics = dict(metrics)
+    aliased_metrics["val_metric_name"] = metric_name
+    aliased_metrics["val_metric_value"] = metric_value
+    aliased_metrics["val_metric_direction"] = metric_direction
+    aliased_metrics["metric_name"] = metric_name
+    aliased_metrics["metric_value"] = metric_value
+    aliased_metrics["metric_direction"] = metric_direction
+    return aliased_metrics
+
+
+def _to_plain_data(value: object) -> object:
     """将复杂对象递归转换为可序列化的基础结构。"""
 
     if is_dataclass(value):
@@ -47,6 +85,18 @@ class PESSolution:
     def to_record(self) -> dict[str, Any]:
         """转换为数据库可消费的字典结构。"""
 
+        metric_name = _get_metric_field(self.metrics, "val_metric_name", "metric_name")
+        metric_value = _get_metric_field(
+            self.metrics,
+            "val_metric_value",
+            "metric_value",
+        )
+        metric_direction = _get_metric_field(
+            self.metrics,
+            "val_metric_direction",
+            "metric_direction",
+        )
+
         return {
             "id": self.id,
             "generation": self.generation,
@@ -56,17 +106,9 @@ class PESSolution:
             "mutated_slot": self.target_slot,
             "parent_ids": self.parent_ids,
             "fitness": self.fitness,
-            "metric_name": (
-                self.metrics.get("metric_name") if self.metrics is not None else None
-            ),
-            "metric_value": (
-                self.metrics.get("metric_value") if self.metrics is not None else None
-            ),
-            "metric_direction": (
-                self.metrics.get("metric_direction")
-                if self.metrics is not None
-                else None
-            ),
+            "metric_name": metric_name,
+            "metric_value": metric_value,
+            "metric_direction": metric_direction,
             "run_id": self.run_id,
             "workspace_dir": self.workspace_dir,
             "solution_file_path": self.solution_file_path,
@@ -82,4 +124,6 @@ class PESSolution:
     def to_prompt_payload(self) -> dict[str, Any]:
         """转换为 Prompt 可消费的轻量上下文。"""
 
-        return _to_plain_data(self)
+        payload = _to_plain_data(self)
+        payload["metrics"] = _build_metric_aliases(self.metrics)
+        return payload

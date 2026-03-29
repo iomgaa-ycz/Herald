@@ -487,25 +487,46 @@ class BasePES(ABC):
 
         if self.db is None or not hasattr(self.db, "update_solution_status"):
             return
+
+        metric_name: str | None = None
+        metric_value: float | None = None
+        metric_direction: str | None = None
+        if solution.metrics is not None:
+            raw_metric_name = solution.metrics.get(
+                "val_metric_name",
+                solution.metrics.get("metric_name"),
+            )
+            raw_metric_value = solution.metrics.get(
+                "val_metric_value",
+                solution.metrics.get("metric_value"),
+            )
+            raw_metric_direction = solution.metrics.get(
+                "val_metric_direction",
+                solution.metrics.get("metric_direction"),
+            )
+            metric_name = (
+                str(raw_metric_name) if raw_metric_name not in (None, "") else None
+            )
+            if isinstance(raw_metric_value, (int, float)):
+                metric_value = float(raw_metric_value)
+            elif isinstance(raw_metric_value, str):
+                try:
+                    metric_value = float(raw_metric_value.strip())
+                except ValueError:
+                    metric_value = None
+            metric_direction = (
+                str(raw_metric_direction)
+                if raw_metric_direction not in (None, "")
+                else None
+            )
+
         self.db.update_solution_status(
             solution_id=solution.id,
             status=solution.status,
             fitness=solution.fitness,
-            metric_name=(
-                solution.metrics.get("metric_name")
-                if solution.metrics is not None
-                else None
-            ),
-            metric_value=(
-                solution.metrics.get("metric_value")
-                if solution.metrics is not None
-                else None
-            ),
-            metric_direction=(
-                solution.metrics.get("metric_direction")
-                if solution.metrics is not None
-                else None
-            ),
+            metric_name=metric_name,
+            metric_value=metric_value,
+            metric_direction=metric_direction,
             execute_summary=solution.execute_summary or None,
             summarize_insight=solution.summarize_insight or None,
             finished_at=solution.finished_at,
@@ -529,6 +550,7 @@ class BasePES(ABC):
             model=getattr(response, "model", None),
             input_messages=[{"role": "user", "content": prompt}],
             output_text=getattr(response, "result", None),
+            turns=getattr(response, "turns", None),
             tokens_in=getattr(response, "tokens_in", None),
             tokens_out=getattr(response, "tokens_out", None),
             latency_ms=getattr(response, "duration_ms", None),

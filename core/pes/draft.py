@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -90,11 +91,18 @@ class DraftPES(BasePES):
         self._assert_execute_fact_matches_final_solution(solution, exec_result)
         exec_result = self._fill_exec_fact_from_runtime_artifacts(exec_result)
         self._persist_exec_log(solution=solution, exec_result=exec_result)
-        solution.execute_summary = self._format_execute_summary(exec_result)
 
         exit_code = exec_result["exit_code"]
         if exit_code != 0:
+            solution.execute_summary = self._format_execute_summary(exec_result)
             raise ValueError(f"solution.py 首次运行失败：{solution.execute_summary}")
+
+        metrics = self._extract_val_metrics(solution=solution, exec_result=exec_result)
+        self._apply_val_metrics(solution=solution, metrics=metrics)
+        solution.execute_summary = self._format_execute_summary(
+            exec_result=exec_result,
+            metrics=solution.metrics,
+        )
 
         return {
             "phase": "execute",
@@ -102,6 +110,7 @@ class DraftPES(BasePES):
             "code": code,
             "solution_file_path": solution.solution_file_path,
             "exec_result": exec_result,
+            "metrics": solution.metrics,
         }
 
     def _extract_execute_fact(self, response: object) -> dict[str, Any]:
@@ -365,16 +374,36 @@ class DraftPES(BasePES):
         if filled_fact.get("stderr") in (None, ""):
             filled_fact["stderr"] = read_artifact("stderr.log")
 
-        metrics_raw = read_artifact("metrics.json")
-        if metrics_raw:
-            try:
-                metrics = json.loads(metrics_raw)
-            except json.JSONDecodeError:
-                metrics = None
-            if isinstance(metrics, dict):
-                filled_fact["metrics"] = metrics
+        metrics = self._load_metrics_artifact()
+        if metrics is not None:
+            filled_fact["metrics"] = metrics
 
         return filled_fact
+
+    def _load_metrics_artifact(self) -> dict[str, Any] | None:
+        """读取 execute 阶段产出的 metrics.json。"""
+
+        if self.workspace is None or not hasattr(
+            self.workspace, "read_runtime_artifact"
+        ):
+            return None
+
+        read_artifact = self.workspace.read_runtime_artifact
+        if not callable(read_artifact):
+            return None
+
+        metrics_raw = read_artifact("metrics.json")
+        if metrics_raw in (None, ""):
+            return None
+
+        try:
+            metrics = json.loads(metrics_raw)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(metrics, dict):
+            return None
+        return metrics
 
     def _persist_exec_log(
         self,
@@ -400,7 +429,186 @@ class DraftPES(BasePES):
             ),
         )
 
-    def _format_execute_summary(self, exec_result: dict[str, Any]) -> str:
+    def _extract_val_metrics(
+        self,
+        solution: PESSolution,
+        exec_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """从真实运行事实中提取本地验证指标。"""
+
+        del solution
+        structured_payload = exec_result.get("metrics")
+        if isinstance(structured_payload, dict):
+            metrics = self._extract_val_metrics_from_structured_payload(
+                structured_payload
+            )
+            if metrics is not None:
+                return self._complete_val_metrics_from_task_spec(metrics)
+
+        stdout = self._coerce_optional_text(exec_result.get("stdout"))
+        if stdout:
+            metrics = self._extract_val_metrics_from_stdout(stdout)
+            if metrics is not None:
+                return self._complete_val_metrics_from_task_spec(metrics)
+
+        raise ValueError("首次运行成功，但未提取到 val_metric_value")
+
+    def _extract_val_metrics_from_structured_payload(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """从结构化 payload 中抽取指标。"""
+
+        metric_value = self._coerce_float(
+            self._first_non_none(
+                payload.get("val_metric_value"),
+                payload.get("metric_value"),
+            )
+        )
+        if metric_value is None:
+            return None
+
+        metric_name_raw = self._first_non_none(
+            payload.get("val_metric_name"),
+            payload.get("metric_name"),
+        )
+        metric_direction_raw = self._first_non_none(
+            payload.get("val_metric_direction"),
+            payload.get("metric_direction"),
+        )
+        return {
+            "val_metric_name": (
+                str(metric_name_raw).strip()
+                if metric_name_raw not in (None, "")
+                else None
+            ),
+            "val_metric_value": metric_value,
+            "val_metric_direction": self._normalize_metric_direction(
+                metric_direction_raw
+            ),
+        }
+
+    def _extract_val_metrics_from_stdout(self, stdout: str) -> dict[str, Any] | None:
+        """从 stdout 中抽取指标。"""
+
+        for line in stdout.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                metrics = self._extract_val_metrics_from_structured_payload(payload)
+                if metrics is not None:
+                    return metrics
+
+        patterns = {
+            "val_metric_name": [
+                r"val_metric_name\s*[:=]\s*([A-Za-z0-9_./-]+)",
+                r"metric_name\s*[:=]\s*([A-Za-z0-9_./-]+)",
+            ],
+            "val_metric_value": [
+                r"val_metric_value\s*[:=]\s*([-+]?\d+(?:\.\d+)?)",
+                r"metric_value\s*[:=]\s*([-+]?\d+(?:\.\d+)?)",
+            ],
+            "val_metric_direction": [
+                r"val_metric_direction\s*[:=]\s*(maximize|max|minimize|min)",
+                r"metric_direction\s*[:=]\s*(maximize|max|minimize|min)",
+            ],
+        }
+
+        extracted: dict[str, Any] = {}
+        for key, key_patterns in patterns.items():
+            for pattern in key_patterns:
+                match = re.search(pattern, stdout, flags=re.IGNORECASE)
+                if match is None:
+                    continue
+                extracted[key] = match.group(1)
+                break
+
+        metric_value = self._coerce_float(extracted.get("val_metric_value"))
+        if metric_value is None:
+            return None
+
+        return {
+            "val_metric_name": extracted.get("val_metric_name"),
+            "val_metric_value": metric_value,
+            "val_metric_direction": self._normalize_metric_direction(
+                extracted.get("val_metric_direction")
+            ),
+        }
+
+    def _complete_val_metrics_from_task_spec(
+        self,
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """使用 task_spec 补齐指标名和方向。"""
+
+        task_spec = self._execution_context.get(
+            "task_spec",
+            self.runtime_context.get("task_spec"),
+        )
+        metric_name: str | None = None
+        metric_direction: str | None = None
+        if isinstance(task_spec, dict):
+            raw_metric_name = task_spec.get("metric_name")
+            raw_metric_direction = task_spec.get("metric_direction")
+            if raw_metric_name not in (None, ""):
+                metric_name = str(raw_metric_name).strip()
+            metric_direction = self._normalize_metric_direction(raw_metric_direction)
+
+        completed_metrics = dict(metrics)
+        if completed_metrics.get("val_metric_name") in (None, ""):
+            completed_metrics["val_metric_name"] = metric_name
+        if completed_metrics.get("val_metric_direction") in (None, ""):
+            completed_metrics["val_metric_direction"] = metric_direction
+        return completed_metrics
+
+    def _normalize_metric_direction(self, direction: object) -> str | None:
+        """将指标方向归一化为 max/min。"""
+
+        if direction in (None, ""):
+            return None
+
+        normalized = str(direction).strip().lower()
+        if normalized.startswith("max"):
+            return "max"
+        if normalized.startswith("min"):
+            return "min"
+        return normalized or None
+
+    def _apply_val_metrics(
+        self,
+        solution: PESSolution,
+        metrics: dict[str, Any],
+    ) -> None:
+        """将 val_metric_* 写回 solution。"""
+
+        metric_name = metrics.get("val_metric_name")
+        metric_value = self._coerce_float(metrics.get("val_metric_value"))
+        metric_direction = self._normalize_metric_direction(
+            metrics.get("val_metric_direction")
+        )
+        if metric_value is None:
+            raise ValueError("val_metric_value 为空，无法回写 fitness")
+
+        solution.metrics = {
+            "val_metric_name": metric_name,
+            "val_metric_value": metric_value,
+            "val_metric_direction": metric_direction,
+            "metric_name": metric_name,
+            "metric_value": metric_value,
+            "metric_direction": metric_direction,
+        }
+        solution.fitness = metric_value
+
+    def _format_execute_summary(
+        self,
+        exec_result: dict[str, Any],
+        metrics: dict[str, Any] | None = None,
+    ) -> str:
         """生成简洁的人类可读执行摘要。"""
 
         exit_code = self._coerce_int(exec_result.get("exit_code"))
@@ -412,9 +620,43 @@ class DraftPES(BasePES):
             if duration_ms.is_integer()
             else f"{duration_ms:.1f}"
         )
-        return (
+        summary = (
             f"已记录首次运行事实：{exec_result['command']} "
             f"(exit_code={exit_code}, duration_ms={duration_text})"
+        )
+        if metrics is None:
+            return summary
+
+        metric_value = self._coerce_float(
+            self._first_non_none(
+                metrics.get("val_metric_value"),
+                metrics.get("metric_value"),
+            )
+        )
+        if metric_value is None:
+            return summary
+
+        metric_name = self._first_non_none(
+            metrics.get("val_metric_name"),
+            metrics.get("metric_name"),
+        )
+        metric_direction = self._first_non_none(
+            metrics.get("val_metric_direction"),
+            metrics.get("metric_direction"),
+        )
+        metric_name_text = (
+            str(metric_name).strip() if metric_name not in (None, "") else "unknown"
+        )
+        metric_direction_text = (
+            str(metric_direction).strip()
+            if metric_direction not in (None, "")
+            else "unknown"
+        )
+        return (
+            f"{summary} "
+            f"(val_metric_name={metric_name_text}, "
+            f"val_metric_value={metric_value}, "
+            f"val_metric_direction={metric_direction_text})"
         )
 
     def _extract_response_text(self, response: object) -> str:
