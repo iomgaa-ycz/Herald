@@ -1,0 +1,15 @@
+[
+  {
+    "role": "assistant",
+    "text": "我写入了一个有语法错误的 solution.py。",
+    "tool_calls": [
+      {
+        "name": "Write",
+        "input": {
+          "file_path": "solution.py"
+        },
+        "result": "Wrote invalid solution.py"
+      }
+    ]
+  }
+]

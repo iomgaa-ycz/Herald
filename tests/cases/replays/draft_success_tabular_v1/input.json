@@ -1,0 +1,5 @@
+{
+  "competition_id": "demo-tabular",
+  "task_type": "tabular",
+  "metric_name": "auc"
+}

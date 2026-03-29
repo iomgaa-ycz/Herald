@@ -1,0 +1,15 @@
+[
+  {
+    "role": "assistant",
+    "text": "我会先在工作区写入 solution.py。",
+    "tool_calls": [
+      {
+        "name": "Write",
+        "input": {
+          "file_path": "solution.py"
+        },
+        "result": "Wrote solution.py"
+      }
+    ]
+  }
+]
