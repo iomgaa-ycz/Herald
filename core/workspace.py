@@ -180,6 +180,18 @@ class Workspace:
         """获取当前工作 solution.py 路径。"""
         return self.working_dir / "solution.py"
 
+    def get_working_submission_path(self, file_name: str = "submission.csv") -> Path:
+        """获取当前工作 submission.csv 路径。
+
+        Args:
+            file_name: 提交文件名
+
+        Returns:
+            提交工件路径
+        """
+
+        return self.working_dir / file_name
+
     def get_working_file_path(self, file_name: str) -> Path:
         """获取 working/ 目录下指定文件路径。
 
@@ -232,6 +244,18 @@ class Workspace:
         if not code.strip():
             raise ValueError(f"代码文件为空: {file_path}")
         return code
+
+    def read_runtime_artifact(self, file_name: str) -> str | None:
+        """读取 execute 阶段生成的运行时工件。
+
+        Args:
+            file_name: 工件文件名，例如 `stdout.log`
+
+        Returns:
+            文本内容；不存在时返回 None
+        """
+
+        return self.read_working_text(file_name)
 
     def get_log_path(self, name: str) -> Path:
         """获取日志文件路径。

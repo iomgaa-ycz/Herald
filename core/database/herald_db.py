@@ -123,6 +123,11 @@ class HeraldDB:
         with self.transaction():
             return self.tracing.log_exec(**kwargs)
 
+    def get_exec_logs(self, solution_id: str) -> list[dict]:
+        """获取 solution 对应的执行日志。"""
+
+        return self.tracing.get_exec_logs(solution_id)
+
     def log_contract_check(self, **kwargs: object) -> str:
         with self.transaction():
             return self.tracing.log_contract_check(**kwargs)
