@@ -1,0 +1,27 @@
+[
+  {
+    "role": "assistant",
+    "text": "我先写出 solution.py，然后执行它并观察报错。",
+    "tool_calls": [
+      {
+        "name": "Write",
+        "input": {
+          "file_path": "solution.py"
+        },
+        "result": "Wrote solution.py"
+      },
+      {
+        "name": "Bash",
+        "input": {
+          "command": "python solution.py"
+        },
+        "result": {
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"solution.py\", line 7, in <module>\n    solve()\n  File \"solution.py\", line 4, in solve\n    raise RuntimeError(\"boom\")\nRuntimeError: boom",
+          "exit_code": 1,
+          "duration_ms": 88
+        }
+      }
+    ]
+  }
+]
