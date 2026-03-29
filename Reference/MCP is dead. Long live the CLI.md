@@ -1,0 +1,75 @@
+# MCP is dead. Long live the CLI
+
+[ejholmes.github.io](https://ejholmes.github.io/2026/02/28/mcp-is-dead-long-live-the-cli.html)
+
+I'm going to make a bold claim: MCP is already dying. We may not fully realize it yet, but the signs are there. OpenClaw doesn't support it. Pi doesn't support it. And for good reason.
+
+When Anthropic announced the Model Context Protocol, the industry collectively lost its mind. Every company scrambled to ship MCP servers as proof they were "AI first." Massive resources poured into new endpoints, new wire formats, new authorization schemes, all so LLMs could talk to services they could already talk to.
+
+I'll admit, I never fully understood the need for it. You know what LLMs are really good at? Figuring things out on their own. Give them a CLI and some docs and they're off to the races.
+
+I tried to avoid writing this for a long time, but I'm convinced MCP provides no real-world benefit, and that we'd be better off without it. Let me explain.
+
+## LLMs don't need a special protocol
+
+LLMs are really good at using command-line tools. They've been trained on millions of man pages, Stack Overflow answers, and GitHub repos full of shell scripts. When I tell Claude to use `gh pr view 123`, it just works.
+
+MCP promised a cleaner interface, but in practice I found myself writing the same documentation anyway: what each tool does, what parameters it accepts, and more importantly, when to use it. The LLM didn't need a new protocol.
+
+## CLIs are for humans too
+
+When Claude does something unexpected with Jira, I can run the same `jira issue view` command and see exactly what it saw. Same input, same output, no mystery.
+
+With MCP, the tool only exists inside the LLM conversation. Something goes wrong and now I'm spelunking through JSON transport logs instead of just running the command myself. Debugging shouldn't require a protocol decoder.
+
+## Composability
+
+This is where the gap gets wide. CLIs compose. I can pipe through `jq`, chain with `grep`, redirect to files. This isn't just convenient; it's often the only practical approach.
+
+Consider analyzing a large Terraform plan:
+
+    terraform show -json plan.out | jq '[.resource_changes[] | select(.change.actions[0] == "no-op" | not)] | length'
+
+With MCP, your options are dumping the entire plan into the context window (expensive, often impossible) or building custom filtering into the MCP server itself. Either way, you're doing more work for a worse result. The CLI approach uses tools that already exist, are well-documented, and that both humans and agents understand.
+
+## Auth already works
+
+MCP is unnecessarily opinionated about auth. Why should a protocol for giving an LLM tools to use need to concern itself with authentication?
+
+CLI tools don't care. `aws` uses profiles and SSO. `gh` uses `gh auth login`. `kubectl` uses kubeconfig. These are battle-tested auth flows that work the same whether I'm at the keyboard or Claude is driving. When auth breaks, I fix it the way I always would: `aws sso login`, `gh auth refresh`. No MCP-specific troubleshooting required.
+
+## No moving parts
+
+Local MCP servers are processes. They need to start up, stay running, and not silently hang. In Claude Code, they're spawned as child processes, which works until it doesn't.
+
+CLI tools are just binaries on disk. No background processes, no state to manage, no initialization dance. They're there when you need them and invisible when you don't.
+
+## The practical pain
+
+Beyond the design philosophy, MCP has real day-to-day friction:
+
+**Initialization is flaky.** I've lost count of the times I've restarted Claude Code because an MCP server didn't come up. Sometimes it works on retry, sometimes I'm clearing state and starting over.
+
+**Re-auth never ends.** Using multiple MCP tools? Have fun authenticating each one. CLIs with SSO or long-lived credentials just don't have this problem. Auth once and you're done.
+
+**Permissions are all-or-nothing.** Claude Code lets you allowlist MCP tools by name, but that's it. You can't scope to read-only operations or restrict parameters. With CLIs, I can allowlist `gh pr view` but require approval for `gh pr merge`. That granularity matters.
+
+## So when does MCP make sense?
+
+I'm not saying MCP is completely useless. If a tool genuinely has no CLI equivalent, MCP might be the right call. I still use plenty in my day-to-day, when it's the only option available.
+
+I might even argue there's some value in having a standardized interface, and that there are probably usecases where it makes more sense than a CLI.
+
+But for the vast majority of work, the CLI is simpler, faster to debug, and more reliable.
+
+## The real lesson
+
+The best tools are the ones that work for both humans and machines. CLIs have had decades of design iteration. They're composable, debuggable, and they piggyback on auth systems that already exist.
+
+MCP tried to build a better abstraction. Turns out we already had a pretty good one.
+
+## A plea to builders
+
+If you're a company investing in an MCP server but you don't have an official CLI, stop and rethink what you're doing. Ship a good API, then ship a good CLI. The agents will figure it out.
+
+[Read in Cubox](https://cubox.pro/web/card/7437112810221342068)

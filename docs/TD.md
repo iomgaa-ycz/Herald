@@ -1,7 +1,7 @@
 # 技术方案（TD）— Herald2
 
 > **状态**: v0.1
-> **更新**: 2026-03-28
+> **更新**: 2026-03-29
 > **目标阶段**: 实现“单进程、单任务类型、串行驱动的 `DraftPES` MVP 闭环”
 
 ---
@@ -477,7 +477,7 @@ class BasePES(ABC):
 
 - 每竞赛运行一次，分析竞赛数据并生成 TaskSpec
 - plan 阶段：分析竞赛 description.md，规划数据探索策略
-- execute 阶段：LLM Agent 用 Bash 工具读取数据文件，生成 TaskSpec + data_profile + 选择 GenomeSchema 模板
+- execute 阶段：LLM Agent 用 Bash + Skill 工具读取数据文件，生成 TaskSpec + 结构化 `data_profile.md` + 选择 GenomeSchema 模板
 - summarize 阶段：总结数据特征、关键发现、建模建议
 
 ### 关键接口签名
@@ -502,13 +502,14 @@ class FeatureExtractPES(BasePES):
 
 ### execute 阶段 LLM Agent 行为
 
-LLM Agent 在 execute 阶段使用 Bash 工具执行以下数据探索操作：
+LLM Agent 在 execute 阶段使用 Bash / Read / Skill 工具执行以下数据探索操作：
 
 1. 读取竞赛 `description.md`，提取任务目标、评估指标
 2. `ls` 数据目录，了解文件结构
 3. `head -20 train.csv` 查看数据样本
 4. `python -c "import pandas as pd; df = pd.read_csv('train.csv'); print(df.shape, df.dtypes, df.isnull().sum())"` 获取数据概况
 5. 分析 `sample_submission.csv` 了解输出格式
+6. 如存在 project skill，则优先调用数据预览与报告格式化 skill，避免临时拼接低可读性的自由文本
 
 LLM Agent 最终输出必须包含：
 
@@ -525,6 +526,21 @@ LLM Agent 最终输出必须包含：
   "genome_template": "tabular"
 }
 ```
+
+### `data_profile.md` 固定结构
+
+`FeatureExtractPES.execute()` 产出的 `workspace/working/data_profile.md` 是下游 Agent 可消费的正式工件，不再额外引入平行的 `json` 报告文件。
+
+固定结构至少包含以下一级标题：
+
+- `# 任务概览`
+- `# 数据文件清单`
+- `# 样本与字段规模`
+- `# 字段类型统计`
+- `# 缺失值与异常`
+- `# 目标列与评估指标`
+- `# Submission 约束`
+- `# 对 DraftPES 的建模提示`
 
 ### 产出与持久化
 
@@ -550,7 +566,7 @@ phases:
     max_turns: 1
   execute:
     max_retries: 1
-    allowed_tools: ["Bash", "Read", "Glob", "Grep"]
+    allowed_tools: ["Bash", "Read", "Glob", "Grep", "Skill"]
     max_turns: 12
   summarize:
     max_retries: 1
@@ -562,7 +578,7 @@ phases:
 
 - `FeatureExtractPES.run()` 能完整执行三阶段
 - execute 阶段产出的 TaskSpec JSON 可解析为 `TaskSpec` dataclass
-- `data_profile.md` 非空且包含字段信息和数据统计
+- `data_profile.md` 非空，且满足固定 section 结构并包含字段信息与数据统计
 - `genome_template` 值为 `"tabular"` 或 `"generic"`
 - 竞赛 `tabular-playground-series-may-2022` 能被正确识别为 `tabular` 类型
 
@@ -614,7 +630,9 @@ class DraftPES(BasePES):
 
 - 消费 FeatureExtractPES 产出的 `task_spec` / `data_profile` / `schema`（通过 Scheduler 注入的 dispatch context）
 - 建立 execute 阶段的 `tool-write` 契约：Agent 必须在工作空间用 tools 写出真实 `working/solution.py`
+- 强化文件名契约：execute 阶段只接受 `working/solution.py`，写成其他 `.py` 文件名视为契约失败，不做自动重命名兜底
 - 运行 `solution.py`
+- 追加人类可读运行日志文件，供长时间 run 的人工观察与排错
 - 提取 `val_metric_value`
 - 生成真实 `submission.csv`
 - 写入 `code_snapshots`
@@ -625,6 +643,8 @@ class DraftPES(BasePES):
 
 - 当前最小版本：`solution_file_path` / `submission_file_path` 已挂载
 - 阶段目标版本：`working/solution.py` 不再是空文件，且有真实内容
+- execute 阶段若写出 `model.py` / `main.py` 等非目标文件名，应被稳定识别为契约失败
+- run 期间存在仅供人类审阅的日志文件，但不替代 `exec_logs` 的机器事实地位
 
 ---
 
@@ -788,7 +808,7 @@ def fixed_function():
 
 - 封装 Claude Agent SDK
 - 统一返回 `LLMResponse`
-- 暴露 `cwd/env/allowed_tools` 等控制参数
+- 暴露 `cwd/env/allowed_tools/setting_sources` 等控制参数
 
 ### 关键接口签名
 
@@ -799,6 +819,7 @@ class LLMConfig:
     max_tokens: int = 32 * 1024
     max_turns: int = 16
     permission_mode: str = "bypassPermissions"
+    setting_sources: tuple[str, ...] = ("project",)
 
 @dataclass(slots=True)
 class LLMResponse:
@@ -830,11 +851,15 @@ class LLMClient:
 - `result` 仅作为文本摘要与人工审阅材料，不作为代码真相来源
 - `turns` 必须完整保留 tool 调用痕迹，用于回放、契约检查与 deepeval 审阅
 - `cwd/env` 透传必须可靠
+- 为保证可复现性，默认只启用 project skills，不默认加载 user skills
+- `FeatureExtractPES.execute` 必须支持 `"Skill"` 工具，供 Agent 自动发现和调用 `.claude/skills/`
+- 若 phase `cwd` 指向 `workspace/working`，则必须保证 `.claude/skills/` 在该目录下可见
 
 ### 验证 Checkpoint
 
 - SDK 不可用时 bootstrap 明确失败
 - `execute_task()` 能返回统一结构
+- 配置开启 project skill 后，Agent 能在 `cwd` 下发现项目技能
 
 ---
 
@@ -850,6 +875,8 @@ class LLMClient:
 
 - 创建工作空间目录
 - 软链接竞赛数据
+- 以软链接方式暴露 project skills 到 `working/.claude/skills/`
+- 创建 run 级人类可读日志文件
 - 保存历史版本
 - 维护 `best/`
 
@@ -859,6 +886,7 @@ class LLMClient:
 class Workspace:
     def __init__(self, root: str | Path) -> None
     def create(self, competition_dir: str | Path) -> Workspace
+    def expose_project_skills(self, project_root: str | Path) -> Path | None
     def save_version(
         self,
         code: str,
@@ -873,6 +901,7 @@ class Workspace:
     ) -> None
     def get_working_solution_path(self) -> Path
     def get_log_path(self, name: str) -> Path
+    def get_run_log_path(self) -> Path
     def summary(self) -> dict[str, str]
 ```
 
@@ -881,6 +910,8 @@ class Workspace:
 - `create()` 必须优先链接 `prepared/public`
 - `working/` 用于当前 solution 输出
 - 工作空间根目录必须承载 run 级 `metadata.json`
+- 若项目根存在 `.claude/skills/`，则 `working/.claude/skills` 必须通过软链接暴露该目录
+- `workspace/logs/run.log` 作为 run 级人类可读日志文件存在，不作为结构化真相来源
 - 阶段目标版本必须把真实 `solution.py` / `submission.csv` 落到 `working/`
 - 成功 run 后应调用 `save_version()`
 - 最优 `fitness` 时应调用 `promote_best()`
@@ -888,6 +919,8 @@ class Workspace:
 ### 验证 Checkpoint
 
 - `data/` 目录能正确映射竞赛数据
+- project skills 目录能通过软链接暴露到 `working/.claude/skills`
+- `run.log` 可持续追加，不影响现有 `working/` 工件和 DB 记录
 - 版本目录能正确保存 solution 与 submission
 
 ---
@@ -1217,6 +1250,7 @@ ConfigManager
 - 修改 `config/prompts/templates/draft_plan.j2`：新增 `data_profile` 区块
 - 修改 `config/prompts/templates/draft_execute.j2`：新增 `data_profile` 区块
 - 写入 run 级 `metadata.json`
+- 约定 `data_profile.md` 采用固定 Markdown 结构，供 DraftPES 稳定消费
 
 **涉及文件**
 
@@ -1234,6 +1268,7 @@ ConfigManager
 - `bootstrap_feature_extract_pes()` 返回有效的 PES 实例
 - DraftPES 的 dispatch context 中存在 `task_spec`、`data_profile`、`schema`
 - `draft_plan` 模板能正确渲染 `data_profile` 区块
+- `draft_execute` 模板能直接消费固定结构的 `data_profile.md`
 - 工作空间存在 `metadata.json`
 
 ### 6.5 Task 5：注入 `run_id` 与 run 级元数据
@@ -1278,12 +1313,14 @@ ConfigManager
 - 要求 Agent 在 execute 阶段通过 tools 写出真实 `working/solution.py`
 - 在 phase 结束后严格校验 `working/solution.py` 是否存在且非空
 - 将该文件内容写入 `code_snapshots`
+- 明确 `solution.py` 是唯一合法代码文件名；不接受自动重命名后处理
 
 **要干什么**
 
 - 在 `DraftPES.handle_phase_response()` 中增加 `tool-write` 契约检查
 - execute 结束后从工作空间读取 `working/solution.py`，并做最小语法校验
 - `solution.py` 缺失、为空或语法不合法时，明确把 solution 置为失败并记录原因
+- `execute` 若只写出 `baseline.py` / `model.py` / `main.py` 等其他文件名，也必须判定失败
 - 同步保存完整代码快照到数据库
 - 明确禁止使用最终输出文本做代码恢复或兜底
 
@@ -1306,11 +1343,13 @@ ConfigManager
 - `tests/cases/replays/draft_missing_solution_file_v1/turns.json`
 - `tests/cases/replays/draft_empty_solution_file_v1/turns.json`
 - `tests/cases/replays/draft_syntax_error_v1/solution.py`
+- `tests/cases/replays/draft_wrong_solution_filename_v1/turns.json`
 
 **测试通过标准**
 
 - success case 能生成非空的 `working/solution.py`
 - missing/empty `solution.py` case 会被明确标记失败，并留下可读错误原因
+- wrong-filename case 会被明确标记为契约失败，不做自动改名
 - `code_snapshots` 中存在与 `solution.py` 一致的完整代码内容
 
 ### 6.7 Task 7：执行 `solution.py` 并记录 `exec_logs`
@@ -1322,12 +1361,14 @@ ConfigManager
 
 - 由 Agent 在 `execute` phase 中真实运行 `working/solution.py`
 - 记录首次真实运行的执行命令、stdout、stderr、exit_code、duration
+- 在不影响现有记录体系的前提下，追加 run 级人类可读日志文件，供长时间 run 的人工观察
 
 **要干什么**
 
 - 在 `DraftPES` 中接入 execute 阶段运行事实的采集与持久化
 - 将 `prepared/public` 作为只读数据来源暴露给运行代码
 - 统一记录执行日志到 `exec_logs`
+- 追加 `workspace/logs/run.log`，仅作为人类审阅材料，不作为结构化真相来源
 - 明确以工件与机器输出作为事实来源，不以模型自然语言“我成功了/我更好了”作为通过依据
 - 运行失败时更新 `solution.status = "failed"` 并保留执行痕迹
 
@@ -1359,6 +1400,7 @@ ConfigManager
 
 - 成功 case 会生成至少一条 `exec_logs`
 - `stdout`、`stderr`、`exit_code`、`duration_s` 都可查询
+- 长时间运行过程中可从 `workspace/logs/run.log` 观察当前进展
 - runtime-error case 不会静默吞错，solution 状态会被明确置为 `failed`
 
 ### 6.8 Task 8：提取 `val_metric_value` 并回写 `fitness`
@@ -1550,6 +1592,7 @@ ConfigManager
 - 建立 `tests/cases/replays/*`
 - 用真实回放替代当前能替代的 mock
 - 为 `plan_summary`、`execute_summary`、`summarize_insight` 增加 deepeval 审阅
+- 增加 skill 相关回放 case、`data_profile.md` 固定格式回放 case、wrong-filename case 与 run-log case
 
 **涉及文件**
 
@@ -1575,12 +1618,186 @@ ConfigManager
   - `draft_syntax_error_v1`
   - `draft_runtime_error_v1`
   - `draft_submission_schema_error_v1`
+  - `feature_extract_skill_preview_success_v1`
+  - `feature_extract_data_profile_format_v1`
+  - `draft_wrong_solution_filename_v1`
+  - `draft_run_log_visible_v1`
 
 **测试通过标准**
 
 - CI 阻塞集在本地与 CI 中都能稳定运行
 - 真实回放用例能覆盖当前 MVP 的成功与主要失败路径
+- 新增回放能覆盖 skill 自动发现、固定格式 `data_profile.md`、文件名契约与 run 级日志可见性
 - deepeval 只作为文本质量审阅，不替代结构化 `assert`
+
+### 6.13 Task 13：接通 Claude Agent SDK 的 project skill 机制
+
+**状态**: ⬜ 待实现
+**目标**: 让 FeatureExtractPES 在 SDK 下能稳定发现并调用项目内 skill，而不依赖个人环境。
+
+**任务是什么**
+
+- 为 `LLMClient` 接通 `setting_sources`
+- 默认仅启用 `project`，避免 user skill 污染研究结果
+- 为 `FeatureExtractPES.execute` 打开 `"Skill"` 工具
+
+**要干什么**
+
+- 修改 `core/llm.py`：支持 `setting_sources`
+- 修改 `config/classconfig/llm.py` 与 `config/herald.yaml`：暴露 skill 相关配置
+- 修改 `config/pes/feature_extract.yaml`：execute phase 允许 `"Skill"`
+- 明确 `DraftPES` 当前阶段默认不依赖 skill
+
+**涉及文件**
+
+- `core/llm.py` [MODIFY]
+- `config/classconfig/llm.py` [MODIFY]
+- `config/herald.yaml` [MODIFY]
+- `config/pes/feature_extract.yaml` [MODIFY]
+
+**必过测试**
+
+- `tests/unit/test_llm_skill_config.py`
+- `tests/integration/test_feature_extract_skill_flow.py`
+
+**测试通过标准**
+
+- SDK 配置中存在 `setting_sources=["project"]`
+- `FeatureExtractPES.execute` 的 `allowed_tools` 中包含 `"Skill"`
+- 无个人 skill 环境时，project skill 仍能被稳定发现
+
+### 6.14 Task 14：实现 FeatureExtract 数据预览 skill
+
+**状态**: ⬜ 待实现
+**目标**: 给 FeatureExtract 提供可复用的数据预览能力，替代临时拼接的一次性 Bash / Python 片段。
+
+**任务是什么**
+
+- 新建 project skill：负责预览 `train/test/sample_submission/description`
+- 将 `Reference/data_preview.py` 中的大函数拆为多个可直接运行的小函数
+- 让 Agent 在需要时按 skill 指南调用这些函数
+
+**要干什么**
+
+- 在 `.claude/skills/feature-extract-data-preview/` 下创建 `SKILL.md`
+- 新建 `scripts/` 下的数据预览函数脚本
+- 约定最小输出：文件清单、样本规模、列统计、缺失值、目标列与 submission 约束
+
+**涉及文件**
+
+- `.claude/skills/feature-extract-data-preview/SKILL.md` [NEW]
+- `.claude/skills/feature-extract-data-preview/scripts/*` [NEW]
+
+**必过测试**
+
+- `tests/unit/test_feature_extract_pes.py`
+- `tests/integration/test_feature_extract_skill_flow.py`
+
+**测试通过标准**
+
+- skill 可被自动发现
+- skill 内脚本能在竞赛目录上稳定运行
+- 预览输出足以支撑后续 `data_profile.md` 编排
+
+### 6.15 Task 15：实现 FeatureExtract 的 `data_profile.md` 格式化 skill
+
+**状态**: ⬜ 待实现
+**目标**: 让 `data_profile.md` 变成固定结构、可读、可被 DraftPES 稳定消费的正式工件。
+
+**任务是什么**
+
+- 新建 project skill：负责将预览结果整理为固定格式 Markdown
+- 固定 `data_profile.md` 标题、区块顺序与最小字段覆盖范围
+- 避免当前“一段话总结”导致的信息丢失和可读性不足
+
+**要干什么**
+
+- 在 `.claude/skills/feature-extract-report-format/` 下创建 `SKILL.md`
+- 提供 Markdown 模板或格式化说明
+- 更新 `feature_extract_execute` prompt，要求最终 `data_profile` 遵守固定结构
+
+**涉及文件**
+
+- `.claude/skills/feature-extract-report-format/SKILL.md` [NEW]
+- `config/prompts/templates/feature_extract_execute.j2` [MODIFY]
+
+**必过测试**
+
+- `tests/unit/test_feature_extract_pes.py`
+- `tests/integration/test_feature_extract_skill_flow.py`
+
+**测试通过标准**
+
+- `workspace/working/data_profile.md` 满足固定标题结构
+- `DraftPES` 的 plan / execute prompt 能稳定消费该报告
+- 回放 case 中的 `data_profile.md` 结构可被稳定断言
+
+### 6.16 Task 16：运行时暴露 project skills 到 `workspace/working/.claude/skills/`
+
+**状态**: ⬜ 待实现
+**目标**: 保证 phase `cwd` 已切到 `workspace/working` 时，Claude Agent SDK 仍能发现项目 skill。
+
+**任务是什么**
+
+- 在工作空间创建 `.claude/skills` 软链接
+- 链接目标指向项目根目录下的 `.claude/skills/`
+- 缺少 project skill 目录时安全跳过
+
+**要干什么**
+
+- 修改 `core/workspace.py`：新增 project skill 暴露逻辑
+- 修改 `core/main.py`：bootstrap 阶段调用 skill 暴露逻辑
+- 在工作空间摘要中暴露当前可见的 skill 目录
+
+**涉及文件**
+
+- `core/workspace.py` [MODIFY]
+- `core/main.py` [MODIFY]
+
+**必过测试**
+
+- `tests/unit/test_workspace_skill_link.py`
+- `tests/unit/test_main_bootstrap.py`
+
+**测试通过标准**
+
+- `workspace/working/.claude/skills` 是指向项目 skill 目录的软链接
+- execute phase 在 `cwd=workspace/working` 时可发现 skill
+- 不存在 `.claude/skills/` 时不会阻塞主链路
+
+### 6.17 Task 17：增加 run 级人类可读日志文件
+
+**状态**: ⬜ 待实现
+**目标**: 在不改变现有结构化记录真相来源的前提下，为长时间运行提供可持续观察的日志窗口。
+
+**任务是什么**
+
+- 新增 `workspace/logs/run.log`
+- 将主流程关键节点持续追加到该文件
+- 明确其仅供人工观察，不替代 `llm_calls`、`exec_logs`、工件文件与 DB 事实
+
+**要干什么**
+
+- 修改 `core/main.py`：bootstrap 时初始化文件日志 handler
+- 修改相关运行链：确保 stage 切换、phase 开始/结束、关键失败原因可进入 `run.log`
+- 保持现有控制台日志和 DB 记录不受影响
+
+**涉及文件**
+
+- `core/main.py` [MODIFY]
+- `core/workspace.py` [MODIFY]
+- 可能涉及：`core/pes/base.py`、`core/scheduler/scheduler.py` [MODIFY]
+
+**必过测试**
+
+- `tests/unit/test_run_logging.py`
+- `tests/integration/test_run_log_flow.py`
+
+**测试通过标准**
+
+- 存在 `workspace/logs/run.log`
+- 长时间运行时可从 `run.log` 看到阶段进度与失败原因
+- 追加 `run.log` 不影响现有 `exec_logs`、`llm_calls`、工件持久化和回放
 
 ---
 
@@ -1591,6 +1808,7 @@ ConfigManager
 - `tests/unit/test_feature_extract_pes.py` [NEW]
 - `tests/unit/test_genome_template.py` [NEW]
 - `tests/unit/test_scheduler_stages.py` [NEW]
+- `tests/unit/test_llm_skill_config.py` [NEW]
 - `tests/unit/test_main_bootstrap.py`
 - `tests/unit/test_draft_pes.py`
 - `tests/unit/test_prompt_manager.py`
@@ -1601,16 +1819,20 @@ ConfigManager
 - `tests/unit/test_submission_validator.py`
 - `tests/unit/test_solution_model.py`
 - `tests/unit/test_workspace.py`
+- `tests/unit/test_workspace_skill_link.py` [NEW]
+- `tests/unit/test_run_logging.py` [NEW]
 - `tests/unit/test_database_roundtrip.py`
 - `tests/unit/test_grading.py`
 
 ### 7.2 集成测试
 
 - `tests/integration/test_feature_extract_draft_pipeline.py` [NEW]
+- `tests/integration/test_feature_extract_skill_flow.py` [NEW]
 - `tests/integration/test_dispatch_flow.py`
 - `tests/integration/test_scheduler_flow.py`
 - `tests/integration/test_draft_pes_tool_write_flow.py`
 - `tests/integration/test_draft_pes_runtime_flow.py`
+- `tests/integration/test_run_log_flow.py` [NEW]
 - `tests/integration/test_draft_pes_grading_flow.py`
 - `tests/integration/test_draft_pes_real_cases.py`
 - `tests/integration/test_deepeval_draft_outputs.py`
@@ -1625,9 +1847,11 @@ ConfigManager
 功能测试的最小验收条件：
 
 - 有 run 级 `metadata.json`
+- 有 `workspace/logs/run.log` 可供人类观察
 - `metadata.json` 中有 `started_at` 与 `finished_at`
 - FeatureExtractPES 成功产出 `working/task_spec.json` 和 `working/data_profile.md`
 - DraftPES 成功消费了 TaskSpec 和 data_profile
+- 若项目存在 `.claude/skills/`，则 `workspace/working/.claude/skills` 可见
 - 有真实 `working/solution.py`
 - 有真实 `working/submission.csv`
 - `solutions` 中有 FeatureExtract 和 Draft 两类 solution 记录
@@ -1655,6 +1879,13 @@ ConfigManager
 
 ```text
 Herald2/
+├── .claude/
+│   └── skills/
+│       ├── feature-extract-data-preview/
+│       │   ├── SKILL.md
+│       │   └── scripts/
+│       └── feature-extract-report-format/
+│           └── SKILL.md
 ├── core/
 │   ├── main.py
 │   ├── llm.py
@@ -1697,6 +1928,12 @@ Herald2/
 │   ├── unit/
 │   ├── integration/
 │   └── grading.py
+├── workspace/
+    ├── logs/
+    │   └── run.log
+    └── working/
+        └── .claude/
+            └── skills -> ../../../.claude/skills
 └── plans/
 ```
 
