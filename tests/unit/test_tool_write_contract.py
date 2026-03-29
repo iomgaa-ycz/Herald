@@ -92,6 +92,7 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
         solution_code = solution_path.read_text(encoding="utf-8")
 
     return {
+        "case_dir": case_dir,
         "turns": json.loads((case_dir / "turns.json").read_text(encoding="utf-8")),
         "solution_code": solution_code,
     }
@@ -103,6 +104,10 @@ def _build_workspace_and_db(tmp_path: Path) -> tuple[Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    (competition_dir / "sample_submission.csv").write_text(
+        "id,target\n1,0\n",
+        encoding="utf-8",
+    )
 
     workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
@@ -133,14 +138,25 @@ def _build_pes(
     return pes, workspace, db
 
 
+def _write_success_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
+    """将成功回放所需工件写入工作区。"""
+
+    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+        source_path = case_dir / file_name
+        if source_path.exists():
+            (working_dir / file_name).write_text(
+                source_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+
 def test_execute_reads_non_empty_solution_file_from_workspace(tmp_path: Path) -> None:
     """execute 成功时应从工作区读取真实代码文件。"""
 
     replay = _load_replay_case("draft_success_tabular_v1")
-    solution_code = str(replay["solution_code"])
 
     def writer(working_dir: Path) -> None:
-        (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
+        _write_success_runtime_artifacts(Path(replay["case_dir"]), working_dir)
 
     pes, workspace, db = _build_pes(tmp_path, writer, replay["turns"])
     solution = pes.create_solution(generation=0)
@@ -148,7 +164,7 @@ def test_execute_reads_non_empty_solution_file_from_workspace(tmp_path: Path) ->
 
     asyncio.run(pes.execute_phase(solution))
 
-    assert workspace.read_working_solution() == solution_code
+    assert workspace.read_working_solution() == str(replay["solution_code"])
     assert "python solution.py" in solution.execute_summary
     assert "exit_code=0" in solution.execute_summary
     assert solution.solution_file_path == str(
@@ -162,10 +178,9 @@ def test_handle_execute_response_persists_code_snapshot_from_written_file(
     """execute 成功后应将代码快照写入数据库。"""
 
     replay = _load_replay_case("draft_success_tabular_v1")
-    solution_code = str(replay["solution_code"])
 
     def writer(working_dir: Path) -> None:
-        (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
+        _write_success_runtime_artifacts(Path(replay["case_dir"]), working_dir)
 
     pes, workspace, db = _build_pes(tmp_path, writer, replay["turns"])
     solution = pes.create_solution(generation=0)

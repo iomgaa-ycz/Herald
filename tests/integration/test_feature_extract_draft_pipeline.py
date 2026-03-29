@@ -64,8 +64,17 @@ class SequencedLLM:
             and isinstance(kwargs.get("cwd"), str)
             and "draft_execute" in prompt
         ):
-            (Path(kwargs["cwd"]) / "solution.py").write_text(
+            working_dir = Path(kwargs["cwd"])
+            (working_dir / "solution.py").write_text(
                 self.execute_code,
+                encoding="utf-8",
+            )
+            (working_dir / "submission.csv").write_text(
+                "id,target\n3,0.8\n",
+                encoding="utf-8",
+            )
+            (working_dir / "metrics.json").write_text(
+                '{"val_metric_name":"auc","val_metric_value":0.5,"val_metric_direction":"max"}',
                 encoding="utf-8",
             )
             turns = [
@@ -77,7 +86,12 @@ class SequencedLLM:
                             "name": "Bash",
                             "input": {"command": "python solution.py"},
                             "result": {
-                                "stdout": "ok\n",
+                                "stdout": (
+                                    "ok\n"
+                                    '{"val_metric_name":"auc",'
+                                    '"val_metric_value":0.5,'
+                                    '"val_metric_direction":"max"}\n'
+                                ),
                                 "stderr": "",
                                 "exit_code": 0,
                                 "duration_ms": 15,

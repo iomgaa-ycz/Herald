@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from core.pes.base import BasePES
+from core.pes.submission import validate_submission_against_sample
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
 
@@ -99,6 +100,8 @@ class DraftPES(BasePES):
 
         metrics = self._extract_val_metrics(solution=solution, exec_result=exec_result)
         self._apply_val_metrics(solution=solution, metrics=metrics)
+        validation = self._validate_submission_artifact(solution)
+        self._apply_submission_validation(solution=solution, result=validation)
         solution.execute_summary = self._format_execute_summary(
             exec_result=exec_result,
             metrics=solution.metrics,
@@ -816,3 +819,83 @@ class DraftPES(BasePES):
                 submission_path = working_dir_path / self.config.submission_file_name
             solution.submission_file_path = str(submission_path)
         self._persist_solution_artifacts(solution)
+
+    def _validate_submission_artifact(
+        self,
+        solution: PESSolution,
+    ) -> dict[str, Any]:
+        """校验 execute 阶段产出的 submission.csv。"""
+
+        submission_path = solution.submission_file_path
+        if submission_path in (None, ""):
+            raise ValueError("submission_file_path 为空，无法校验 submission.csv")
+
+        sample_submission_path = self._resolve_sample_submission_path()
+        validation = validate_submission_against_sample(
+            submission_path=submission_path,
+            sample_submission_path=sample_submission_path,
+        )
+        if not validation.is_valid:
+            errors_text = "; ".join(validation.errors)
+            solution.metadata["submission_validated"] = False
+            solution.metadata["submission_validation_errors"] = list(validation.errors)
+            solution.metadata["sample_submission_path"] = str(sample_submission_path)
+            raise ValueError(f"submission.csv 校验失败: {errors_text}")
+
+        return {
+            "is_valid": validation.is_valid,
+            "errors": validation.errors,
+            "submission_schema_columns": validation.submission_schema.columns,
+            "submission_row_count": validation.submission_schema.row_count,
+            "sample_schema_columns": validation.sample_schema.columns,
+            "sample_row_count": validation.sample_schema.row_count,
+            "sample_submission_path": str(sample_submission_path),
+        }
+
+    def _resolve_sample_submission_path(self) -> Path:
+        """定位真实 sample_submission.csv。"""
+
+        competition_dir = self._execution_context.get(
+            "competition_dir",
+            self.runtime_context.get("competition_dir"),
+        )
+        if competition_dir in (None, ""):
+            raise ValueError("缺少 competition_dir，无法定位 sample_submission.csv")
+
+        competition_root = Path(str(competition_dir)).expanduser().resolve()
+        candidate_paths = [
+            competition_root / "prepared" / "public" / "sample_submission.csv",
+            competition_root / "sample_submission.csv",
+        ]
+        workspace_data_dir = getattr(self.workspace, "data_dir", None)
+        if isinstance(workspace_data_dir, (str, Path)):
+            candidate_paths.append(
+                Path(workspace_data_dir).expanduser().resolve() / "sample_submission.csv"
+            )
+        for candidate_path in candidate_paths:
+            if candidate_path.exists():
+                return candidate_path
+
+        raise ValueError(
+            "未找到 sample_submission.csv: "
+            + ", ".join(str(path) for path in candidate_paths)
+        )
+
+    def _apply_submission_validation(
+        self,
+        solution: PESSolution,
+        result: dict[str, Any],
+    ) -> None:
+        """将 submission 校验结果写入 solution.metadata。"""
+
+        solution.metadata["submission_validated"] = bool(result.get("is_valid"))
+        solution.metadata["submission_validation_errors"] = list(
+            result.get("errors", [])
+        )
+        solution.metadata["submission_schema_columns"] = list(
+            result.get("submission_schema_columns", [])
+        )
+        solution.metadata["submission_row_count"] = result.get("submission_row_count")
+        solution.metadata["sample_submission_path"] = result.get(
+            "sample_submission_path"
+        )

@@ -1,0 +1,27 @@
+[
+  {
+    "role": "assistant",
+    "text": "我会先在工作区写入 solution.py，然后执行它。",
+    "tool_calls": [
+      {
+        "name": "Write",
+        "input": {
+          "file_path": "solution.py"
+        },
+        "result": "Wrote solution.py"
+      },
+      {
+        "name": "Bash",
+        "input": {
+          "command": "python solution.py"
+        },
+        "result": {
+          "stdout": "training done\nsubmission missing",
+          "stderr": "",
+          "exit_code": 0,
+          "duration_ms": 1234
+        }
+      }
+    ]
+  }
+]

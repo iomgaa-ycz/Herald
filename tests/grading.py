@@ -281,6 +281,15 @@ def _resolve_submission_file_path(context: object) -> Path | None:
     return Path(value).expanduser().resolve()
 
 
+def _resolve_submission_validated(context: object) -> bool | None:
+    """从 hook context 中解析 submission 校验状态。"""
+
+    value = _resolve_context_value(context, "submission_validated")
+    if value is None:
+        return None
+    return bool(value)
+
+
 def _resolve_status(context: object) -> str | None:
     """从 hook context 中解析 solution 状态。"""
 
@@ -354,6 +363,13 @@ class MLEBenchGradingHook:
         submission_file_path = _resolve_submission_file_path(context)
         if submission_file_path is None:
             logger.debug("submission.csv 缺失，跳过评分: solution_id=%s", solution_id)
+            return None
+        submission_validated = _resolve_submission_validated(context)
+        if submission_validated is False:
+            logger.debug(
+                "submission.csv 未通过校验，跳过评分: solution_id=%s",
+                solution_id,
+            )
             return None
 
         competition_dir = _resolve_competition_dir(context, self.config)

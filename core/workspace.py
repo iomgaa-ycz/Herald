@@ -245,6 +245,22 @@ class Workspace:
             raise ValueError(f"代码文件为空: {file_path}")
         return code
 
+    def read_working_submission(self, file_name: str = "submission.csv") -> str:
+        """读取工作区中的 submission.csv。"""
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            raise ValueError(f"工作区未找到提交文件: {file_path}")
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise ValueError(f"读取提交文件失败: {file_path}") from error
+
+        if not content.strip():
+            raise ValueError(f"提交文件为空: {file_path}")
+        return content
+
     def read_runtime_artifact(self, file_name: str) -> str | None:
         """读取 execute 阶段生成的运行时工件。
 

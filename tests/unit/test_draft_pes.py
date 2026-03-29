@@ -63,8 +63,17 @@ class DummyLLM:
             and isinstance(kwargs.get("cwd"), str)
             and "draft_execute" in prompt
         ):
-            solution_path = Path(kwargs["cwd"]) / "solution.py"
+            working_dir = Path(kwargs["cwd"])
+            solution_path = working_dir / "solution.py"
             solution_path.write_text(self.execute_code, encoding="utf-8")
+            (working_dir / "submission.csv").write_text(
+                "id,target\n1,0.9\n",
+                encoding="utf-8",
+            )
+            (working_dir / "metrics.json").write_text(
+                '{"val_metric_name":"accuracy","val_metric_value":0.91,"val_metric_direction":"max"}',
+                encoding="utf-8",
+            )
             turns = [
                 {
                     "role": "assistant",
@@ -74,7 +83,12 @@ class DummyLLM:
                             "name": "Bash",
                             "input": {"command": "python solution.py"},
                             "result": {
-                                "stdout": "ok\n",
+                                "stdout": (
+                                    "ok\n"
+                                    '{"val_metric_name":"accuracy",'
+                                    '"val_metric_value":0.91,'
+                                    '"val_metric_direction":"max"}\n'
+                                ),
                                 "stderr": "",
                                 "exit_code": 0,
                                 "duration_ms": 10,
@@ -152,6 +166,18 @@ class DummyWorkspace:
         if not code.strip():
             raise ValueError(f"代码文件为空: {file_path}")
         return code
+
+    def read_working_submission(self, file_name: str = "submission.csv") -> str:
+        """读取工作区中的 submission.csv。"""
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            raise ValueError(f"工作区未找到提交文件: {file_path}")
+
+        content = file_path.read_text(encoding="utf-8")
+        if not content.strip():
+            raise ValueError(f"提交文件为空: {file_path}")
+        return content
 
     def get_working_submission_path(self, file_name: str = "submission.csv") -> Path:
         """返回 working/ 下的 submission 路径。"""
@@ -245,10 +271,11 @@ def _build_prompt_manager() -> PromptManager:
     )
 
 
-def _build_runtime_context() -> dict[str, object]:
+def _build_runtime_context(competition_dir: str) -> dict[str, object]:
     """构造 DraftPES 运行所需的最小上下文。"""
 
     return {
+        "competition_dir": competition_dir,
         "task_spec": {
             "task_type": "tabular_ml",
             "competition_name": "demo",
@@ -286,6 +313,10 @@ def _build_workspace(tmp_path: Path) -> DummyWorkspace:
     for path in (data_dir, working_dir, logs_dir, db_path.parent):
         path.mkdir(parents=True, exist_ok=True)
     db_path.touch(exist_ok=True)
+    (data_dir / "sample_submission.csv").write_text(
+        "id,target\n1,0\n",
+        encoding="utf-8",
+    )
 
     return DummyWorkspace(
         root=root,
@@ -425,7 +456,7 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
         config=load_pes_config("config/pes/draft.yaml"),
         llm=llm,
         workspace=workspace,
-        runtime_context=_build_runtime_context(),
+        runtime_context=_build_runtime_context(str(workspace.root)),
         prompt_manager=_build_prompt_manager(),
     )
 

@@ -94,6 +94,7 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
     stderr_path = case_dir / "stderr.log"
 
     return {
+        "case_dir": case_dir,
         "turns": json.loads((case_dir / "turns.json").read_text(encoding="utf-8")),
         "solution_code": solution_code,
         "expected": (
@@ -116,6 +117,10 @@ def _build_workspace_and_db(tmp_path: Path) -> tuple[Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    (competition_dir / "sample_submission.csv").write_text(
+        "id,target\n1,0\n",
+        encoding="utf-8",
+    )
 
     workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
@@ -145,6 +150,18 @@ def _build_pes(
     return pes, workspace, db
 
 
+def _write_success_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
+    """将成功回放所需工件写入工作区。"""
+
+    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+        source_path = case_dir / file_name
+        if source_path.exists():
+            (working_dir / file_name).write_text(
+                source_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+
 def test_extract_execute_fact_from_real_tool_trace(tmp_path: Path) -> None:
     """成功回放可恢复首次真实运行事实。"""
 
@@ -160,7 +177,7 @@ def test_extract_execute_fact_from_real_tool_trace(tmp_path: Path) -> None:
     assert exec_fact["exit_code"] == int(expected.get("exit_code", 0))
     assert exec_fact["duration_ms"] == float(expected.get("duration_ms", 1234.0))
     if replay["stdout"] is not None:
-        assert exec_fact["stdout"] == replay["stdout"]
+        assert exec_fact["stdout"] == replay["stdout"].rstrip("\n")
     else:
         assert exec_fact["stdout"] == "training done\nsubmission written to submission.csv"
     if replay["stderr"] is not None:
@@ -198,3 +215,24 @@ def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
         assert "RuntimeError: boom" in exec_logs[0]["stderr"]
     assert solution.status == "failed"
     assert "首次运行失败" in solution.metadata["failure_reason"]
+
+
+def test_execute_fact_success_case_can_fill_metrics_from_runtime_artifacts(
+    tmp_path: Path,
+) -> None:
+    """成功回放会从 runtime 工件补全结构化指标。"""
+
+    replay = _load_replay_case("draft_success_tabular_v1")
+
+    def writer(working_dir: Path) -> None:
+        _write_success_runtime_artifacts(Path(replay["case_dir"]), working_dir)
+
+    pes, _, db = _build_pes(tmp_path, writer, replay["turns"])
+    solution = pes.create_solution(generation=0)
+    db.insert_solution(solution.to_record())
+
+    asyncio.run(pes.execute_phase(solution))
+
+    assert solution.metrics is not None
+    assert solution.metrics["val_metric_name"] == "accuracy"
+    assert solution.metrics["val_metric_value"] == 0.81

@@ -1,7 +1,8 @@
-"""DraftPES tool-write 集成测试。"""
+"""DraftPES runtime 指标与 submission 校验集成测试。"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,14 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from core.agent.registry import AgentRegistry
+from core.agent.profile import AgentProfile
 from core.database.herald_db import HeraldDB
-from core.events import EventBus, setup_task_dispatcher
-from core.events.types import TaskCompleteEvent
+from core.events import EventBus
 from core.pes.config import load_pes_config
 from core.pes.draft import DraftPES
 from core.pes.registry import PESRegistry
-from core.scheduler import Scheduler
 from core.workspace import Workspace
 
 
@@ -24,7 +23,6 @@ def setup_function() -> None:
     """每个测试前重置全局单例。"""
 
     EventBus.reset()
-    AgentRegistry.reset()
     PESRegistry.reset()
 
 
@@ -58,7 +56,7 @@ class DummyPromptManager:
 
 
 class ReplayLLM:
-    """按顺序返回回放响应，并在 execute 时写入工作区。"""
+    """按回放资产写入工作区并返回固定响应。"""
 
     def __init__(
         self,
@@ -93,16 +91,22 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
     """读取回放资产。"""
 
     case_dir = REPLAY_DIR / case_name
-    solution_path = case_dir / "solution.py"
-    solution_code = None
-    if solution_path.exists():
-        solution_code = solution_path.read_text(encoding="utf-8")
-
     return {
         "case_dir": case_dir,
         "turns": json.loads((case_dir / "turns.json").read_text(encoding="utf-8")),
-        "solution_code": solution_code,
     }
+
+
+def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
+    """将回放工件写入工作区。"""
+
+    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+        source_path = case_dir / file_name
+        if source_path.exists():
+            (working_dir / file_name).write_text(
+                source_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
 
 
 def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
@@ -122,20 +126,20 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     return competition_dir, workspace, db
 
 
-def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
-    """将回放工件写入工作区。"""
+def _build_agent_profile() -> AgentProfile:
+    """构造最小 agent profile。"""
 
-    for file_name in ("solution.py", "submission.csv", "metrics.json"):
-        source_path = case_dir / file_name
-        if source_path.exists():
-            (working_dir / file_name).write_text(
-                source_path.read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
+    return AgentProfile(
+        name="draft-agent",
+        display_name="Draft Agent",
+        prompt_text="",
+    )
 
 
-def test_draft_pes_tool_write_success_flow(tmp_path: Path) -> None:
-    """成功回放会生成真实 solution.py 并同步代码快照。"""
+def test_draft_pes_runtime_success_backfills_fitness_and_submission_validation(
+    tmp_path: Path,
+) -> None:
+    """成功回放会同时回写 fitness 与 submission 校验结果。"""
 
     replay = _load_replay_case("draft_success_tabular_v1")
 
@@ -143,7 +147,7 @@ def test_draft_pes_tool_write_success_flow(tmp_path: Path) -> None:
         _write_case_runtime_artifacts(Path(replay["case_dir"]), working_dir)
 
     competition_dir, workspace, db = _build_runtime(tmp_path)
-    DraftPES(
+    pes = DraftPES(
         config=load_pes_config("config/pes/draft.yaml"),
         llm=ReplayLLM(
             responses=["计划完成", "执行完成", "总结完成"],
@@ -155,101 +159,70 @@ def test_draft_pes_tool_write_success_flow(tmp_path: Path) -> None:
         runtime_context={
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
+            "task_spec": {
+                "metric_name": "accuracy",
+                "metric_direction": "max",
+            },
         },
         prompt_manager=DummyPromptManager(),
     )
-    setup_task_dispatcher()
 
-    received_events: list[TaskCompleteEvent] = []
-    EventBus.get().on(TaskCompleteEvent.EVENT_TYPE, received_events.append)
+    solution = asyncio.run(pes.run(agent_profile=_build_agent_profile(), generation=0))
+    solution_row = db.get_solution(solution.id)
 
-    scheduler = Scheduler(
-        competition_dir=str(competition_dir),
-        max_tasks=1,
-        context={"run_id": "run-001"},
-    )
-    scheduler.run()
-
-    assert len(received_events) == 1
-    assert received_events[0].status == "completed"
-    assert workspace.read_working_solution() == str(replay["solution_code"])
+    assert solution.status == "completed"
+    assert solution.metrics is not None
+    assert solution.metrics["val_metric_value"] == 0.81
+    assert solution.fitness == 0.81
+    assert solution.metadata["submission_validated"] is True
+    assert solution_row is not None
+    assert solution_row["status"] == "completed"
+    assert solution_row["fitness"] == 0.81
     assert workspace.read_working_submission() == "id,target\n1,0.9\n"
 
-    snapshot = db.get_latest_code_snapshot(received_events[0].solution_id)
-    assert snapshot is not None
-    assert snapshot["full_code"] == workspace.read_working_solution()
 
+def test_draft_pes_runtime_invalid_submission_marks_failed(tmp_path: Path) -> None:
+    """schema 错误的 submission 会让 solution 进入 failed。"""
 
-@pytest.mark.parametrize(
-    ("case_name", "execute_writer_factory", "expected_reason"),
-    [
-        ("draft_missing_solution_file_v1", lambda _: None, "未写出代码文件"),
-        (
-            "draft_empty_solution_file_v1",
-            lambda code: (
-                lambda working_dir: (working_dir / "solution.py").write_text(
-                    code,
-                    encoding="utf-8",
-                )
-            ),
-            "代码文件为空",
-        ),
-        (
-            "draft_syntax_error_v1",
-            lambda code: (
-                lambda working_dir: (working_dir / "solution.py").write_text(
-                    code,
-                    encoding="utf-8",
-                )
-            ),
-            "语法错误",
-        ),
-    ],
-)
-def test_draft_pes_tool_write_failure_flow(
-    tmp_path: Path,
-    case_name: str,
-    execute_writer_factory: Callable[[str | None], Callable[[Path], None] | None],
-    expected_reason: str,
-) -> None:
-    """失败回放会显式标记 failed，且调度器不会卡住。"""
+    replay = _load_replay_case("draft_submission_schema_error_v1")
 
-    replay = _load_replay_case(case_name)
-    solution_code = replay["solution_code"]
-    execute_writer = execute_writer_factory(solution_code)
+    def writer(working_dir: Path) -> None:
+        _write_case_runtime_artifacts(Path(replay["case_dir"]), working_dir)
 
     competition_dir, workspace, db = _build_runtime(tmp_path)
-    DraftPES(
+    pes = DraftPES(
         config=load_pes_config("config/pes/draft.yaml"),
         llm=ReplayLLM(
             responses=["计划完成", "执行完成"],
             turns=replay["turns"],
-            execute_writer=execute_writer,
+            execute_writer=writer,
         ),
         db=db,
         workspace=workspace,
         runtime_context={
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
+            "task_spec": {
+                "metric_name": "accuracy",
+                "metric_direction": "max",
+            },
         },
         prompt_manager=DummyPromptManager(),
     )
-    setup_task_dispatcher()
 
-    received_events: list[TaskCompleteEvent] = []
-    EventBus.get().on(TaskCompleteEvent.EVENT_TYPE, received_events.append)
+    solution = pes.create_solution(generation=0)
+    db.insert_solution(solution.to_record())
 
-    scheduler = Scheduler(
-        competition_dir=str(competition_dir),
-        max_tasks=1,
-        context={"run_id": "run-001"},
-    )
-    scheduler.run()
+    with pytest.raises(ValueError, match="submission.csv 校验失败"):
+        asyncio.run(pes.execute_phase(solution))
 
-    assert len(received_events) == 1
-    assert received_events[0].status == "failed"
+    solution_row = db.get_solution(solution.id)
 
-    solution_row = db.get_solution(received_events[0].solution_id)
+    assert solution.status == "failed"
+    assert solution.metrics is not None
+    assert solution.metrics["val_metric_value"] == 0.81
+    assert solution.fitness == 0.81
+    assert solution.metadata["submission_validated"] is False
+    assert "submission.csv 校验失败" in solution.metadata["failure_reason"]
     assert solution_row is not None
     assert solution_row["status"] == "failed"
-    assert expected_reason in solution_row["execute_summary"]

@@ -101,6 +101,7 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
     stderr_path = case_dir / "stderr.log"
 
     return {
+        "case_dir": case_dir,
         "turns": json.loads((case_dir / "turns.json").read_text(encoding="utf-8")),
         "solution_code": solution_code,
         "expected": (
@@ -123,6 +124,10 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    (competition_dir / "sample_submission.csv").write_text(
+        "id,target\n1,0\n",
+        encoding="utf-8",
+    )
 
     workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
@@ -130,15 +135,26 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     return competition_dir, workspace, db
 
 
+def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
+    """将回放工件写入工作区。"""
+
+    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+        source_path = case_dir / file_name
+        if source_path.exists():
+            (working_dir / file_name).write_text(
+                source_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+
 def test_draft_pes_execute_fact_success_flow(tmp_path: Path) -> None:
     """成功回放会在 solution 完成后写入至少一条 exec_logs。"""
 
     replay = _load_replay_case("draft_success_tabular_v1")
-    solution_code = str(replay["solution_code"])
     expected = dict(replay["expected"])
 
     def writer(working_dir: Path) -> None:
-        (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
+        _write_case_runtime_artifacts(Path(replay["case_dir"]), working_dir)
 
     competition_dir, workspace, db = _build_runtime(tmp_path)
     DraftPES(
@@ -181,9 +197,11 @@ def test_draft_pes_execute_fact_success_flow(tmp_path: Path) -> None:
     assert exec_logs[0]["duration_ms"] == expected_duration_ms
 
     if replay["stdout"] is not None:
-        assert exec_logs[0]["stdout"] == replay["stdout"]
+        assert exec_logs[0]["stdout"] == replay["stdout"].rstrip("\n")
     if replay["stderr"] is not None:
         assert exec_logs[0]["stderr"] == replay["stderr"]
+
+    assert exec_logs[0]["metrics"]["val_metric_value"] == 0.81
 
 
 def test_draft_pes_execute_fact_failure_flow(tmp_path: Path) -> None:
@@ -239,3 +257,50 @@ def test_draft_pes_execute_fact_failure_flow(tmp_path: Path) -> None:
         assert exec_logs[0]["stderr"] == replay["stderr"]
     else:
         assert "RuntimeError: boom" in exec_logs[0]["stderr"]
+
+
+def test_draft_pes_execute_fact_submission_schema_error_flow(tmp_path: Path) -> None:
+    """submission schema 错误会被稳定识别并标记 failed。"""
+
+    replay = _load_replay_case("draft_submission_schema_error_v1")
+    solution_code = str(replay["solution_code"])
+
+    def writer(working_dir: Path) -> None:
+        _write_case_runtime_artifacts(Path(replay["case_dir"]), working_dir)
+        if solution_code:
+            (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
+
+    competition_dir, workspace, db = _build_runtime(tmp_path)
+    DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=ReplayLLM(
+            responses=["计划完成", "执行完成"],
+            turns=replay["turns"],
+            execute_writer=writer,
+        ),
+        db=db,
+        workspace=workspace,
+        runtime_context={
+            "competition_dir": str(competition_dir),
+            "run_id": "run-001",
+        },
+        prompt_manager=DummyPromptManager(),
+    )
+    setup_task_dispatcher()
+
+    received_events: list[TaskCompleteEvent] = []
+    EventBus.get().on(TaskCompleteEvent.EVENT_TYPE, received_events.append)
+
+    scheduler = Scheduler(
+        competition_dir=str(competition_dir),
+        max_tasks=1,
+        context={"run_id": "run-001"},
+    )
+    scheduler.run()
+
+    assert len(received_events) == 1
+    assert received_events[0].status == "failed"
+
+    solution_row = db.get_solution(received_events[0].solution_id)
+    assert solution_row is not None
+    assert "submission.csv 校验失败" in solution_row["execute_summary"]
