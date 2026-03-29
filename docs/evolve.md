@@ -185,6 +185,60 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 原则上应避免无语义的 mock。
 若必须替代外部 LLM，则只能使用**基于真实历史运行结果的回放式测试资产**。
 
+#### 5.1.1 输入来源分层定义（L1 / L2 / L3）
+
+Herald2 的测试输入按**可信度**分为三层。每层有明确的适用边界，禁止越级使用。
+
+| 层级 | 名称 | 定义 | 前置条件 | 适用范围 |
+|---|---|---|---|---|
+| **L1** | 真实竞赛 + 真实 LLM | 对真实竞赛数据目录执行 `python core/main.py`，由真实 LLM 驱动全链路 | `HERALD_TEST_DATA_ROOT` 可用 + `claude_agent_sdk` 可用 | 功能测试（evolve.md §6.4） |
+| **L2** | 真实运行回放 | 从一次 **L1 运行**的产物中截取的 `turns.json`、`solution.py`、`stdout.log` 等文件，通过 `ReplayLLM` 回放 | L1 至少成功运行过一次，截取的资产已存入 `tests/cases/replays/` | 单元测试 + 集成测试（替代 LLM 调用） |
+| **L3** | 最小人工构造 | 手工编写的最小输入数据（字典、字符串、配置文件） | 无 | **仅限**纯逻辑验证：数据结构映射、配置解析、类型构造、DB 读写一致性 |
+
+**硬约束：**
+
+1. **L2 必须从 L1 截取。** 如果 `tests/cases/replays/` 中的文件不是从真实运行中截取，而是手工编写的，那它本质上是 L3 冒充 L2——系统会误以为自己验证了"对真实运行结果的处理"，实际上没有。
+2. **L3 不得用于验证执行事实处理逻辑。** 以下场景必须使用 L2 或更高层级的输入：
+   - tool trace 解析（`_extract_execute_fact`）
+   - val_metric 提取（`_extract_val_metrics`）
+   - submission 格式校验
+   - code snapshot 持久化
+   - exec_logs 写入
+3. **L1 运行的副产物应自动归档为 L2 资产。** 建议在 `conftest.py` 或 CI 中加入截取逻辑，确保 L2 资产随 L1 运行持续更新。
+
+**反模式示例：**
+
+```python
+# BAD: L3 冒充 L2
+# turns.json 中 stdout 为手写的 "training done\nsubmission written"
+# solution.py 是空壳 solve() 函数
+# metrics.json 是手写的 {"val_metric_value": 0.8123}
+# 这些数据没有经过真实 LLM + 真实脚本运行，不能验证系统对真实产物的处理能力
+
+# GOOD: 真正的 L2
+# turns.json 截取自一次真实 main.py 运行的 llm_calls 表
+# solution.py 是 Agent 真实生成的代码（含 pandas import、模型训练等）
+# stdout.log 含真实训练日志、warning、metric 输出
+# metrics.json 由真实脚本计算产出
+```
+
+**L2 截取规范：**
+
+从一次 L1 运行中截取回放资产时，每个回放目录应包含：
+
+| 文件 | 来源 | 说明 |
+|---|---|---|
+| `input.json` | 运行配置 | `competition_id`、`task_type`、`metric_name` |
+| `turns.json` | `llm_calls` 表中 execute phase 的完整记录 | 保留所有 tool_call 与 result |
+| `solution.py` | `working/solution.py` 副本 | Agent 真实写出的代码 |
+| `stdout.log` | turns 中 Bash tool_call result 的 stdout | 真实脚本输出 |
+| `stderr.log` | 同上的 stderr | 含 warning / traceback |
+| `metrics.json` | `working/metrics.json` 副本（如存在） | 脚本产出的结构化指标 |
+| `submission.csv` | `working/submission.csv` 副本（如存在） | 脚本产出的提交文件 |
+| `expected.json` | 人工标注 | 该回放应通过的断言值 |
+
+详细测试矩阵见 `docs/test_matrix.md`。
+
 ### 5.2 真实竞赛数据用例
 
 竞赛数据不直接复制进仓库，统一通过本地 MLE-Bench 数据目录引用。
