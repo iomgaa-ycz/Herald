@@ -1,7 +1,7 @@
 # Herald2 Evolve 规范
 
 > **版本**: v0.1
-> **更新**: 2026-03-28
+> **更新**: 2026-03-29
 > **定位**: Herald2 的记录、观测、回放、评测与测试规范
 
 ---
@@ -43,6 +43,31 @@ Herald2 当前的阶段性目标是：
 - 多任务并行
 - 以 `test_score` 驱动在线调度
 
+### 2.1 “不依赖模型自述”的精确定义
+
+Herald2 当前阶段强调“不依赖模型自述”，但这里的含义必须收紧，否则会误伤真正有价值的执行事实。
+
+这里**不可信**的是：
+
+- 模型在自然语言里声称“我成功了”
+- 模型在自然语言里判断“这次结果更好”
+- 模型在自然语言里自行宣布“通过 / 失败”
+
+这里**可信**的是模型在 execute 阶段真实产出的机器事实：
+
+- `working/solution.py`
+- `working/submission.csv`
+- Bash / Python 真实运行产生的 `stdout`、`stderr`、`exit_code`
+- 脚本自己打印、写入 JSON 或落盘文件中的 `val_metric_value` / `fitness`
+
+因此，Harness 的职责是：
+
+- 记录和持久化这些执行事实
+- 基于这些事实做最小一致性校验
+- 避免把模型自然语言总结当作 pass/fail 或优劣判断依据
+
+当前阶段**不要求** Harness 仅为了证明“不是模型自述”，就对已经昂贵的竞赛脚本再做一次强制全量重跑。对 Kaggle / mle-bench 这类高成本任务，优先复用 execute phase 首次真实运行产生的事实。
+
 ---
 
 ## 3. 分数语义契约
@@ -51,8 +76,8 @@ Herald2 必须强制区分两类分数。
 
 | 字段 | 含义 | 来源 | 用途 | 是否参与调度 |
 |---|---|---|---|---|
-| `val_metric_value` | 当前方案在本地训练集切分出的验证集上的分数 | PES 执行结果 | 方案比较、局部优化、fitness 计算 | 是 |
-| `fitness` | 系统内部用于选择与进化的统一分数 | 通常由 `val_metric_value` 归一化后得到 | 调度、选择、进化压力 | 是 |
+| `val_metric_value` | 当前方案在本地训练集切分出的验证集上的分数 | 脚本真实运行产物（stdout / JSON / 文件） | 方案比较、局部优化、fitness 计算 | 是 |
+| `fitness` | 系统内部用于选择与进化的统一分数 | 由运行产出的 `val_metric_value` 归一化后得到 | 调度、选择、进化压力 | 是 |
 | `test_score` | `submission.csv` 交给 MLE-Bench / Kaggle 官方评分后的分数 | 外部评分系统 | 评估系统真实可用性、检测过拟合、实验分析 | 否 |
 
 硬规则如下：
@@ -62,6 +87,7 @@ Herald2 必须强制区分两类分数。
 3. 每个成功生成 `submission.csv` 的 solution，都应尽可能补采 `test_score`
 4. 报告中必须同时展示 `val_metric_value` 与 `test_score`
 5. 当 `val_metric_value` 高、`test_score` 低时，应视为可疑过拟合信号
+6. 自然语言总结中的“分数很好 / 方案更优”不能直接覆盖脚本真实运行产出的分数字段
 
 推荐字段命名：
 
@@ -99,7 +125,7 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 | FeatureExtract Execute | 数据探索命令与输出、TaskSpec JSON、data_profile 报告、GenomeSchema 模板选择 | `llm_calls` + `working/task_spec.json` + `working/data_profile.md` | 查 DB / 看 `working/` |
 | FeatureExtract Summarize | 数据特征总结、关键发现、建模建议 | `llm_calls` + 日志 | 查 DB / 读日志 |
 | Draft Plan Phase | prompt、agent profile、模型、tokens、latency、原始输出、plan 摘要 | `llm_calls` + 日志 | 查 DB / 读日志 |
-| Draft Execute Phase | 原始输出、tool 调用轨迹、`solution.py`、契约检查结果、执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `contract_checks` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
+| Draft Execute Phase | 原始输出、tool 调用轨迹、`solution.py`、契约检查结果、首次真实运行的执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `contract_checks` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
 | Draft Summarize Phase | summarize prompt、原始输出、最终 insight、下轮建议 | `llm_calls` + 报告文件 | 查 DB / 读报告 |
 | 外部评分 | `test_score`、方向、奖牌、阈值、是否有效提交 | 独立评分结果 + 日志 + solution metadata | 看评分报告 / 查结果 |
 
@@ -120,6 +146,12 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 - **日志存过程**
 - **文件存产物**
 - **报告存结论**
+
+补充约束：
+
+- `exec_logs` 记录的是 execute phase 的真实运行事实，优先来自首次运行
+- 高成本脚本不应仅为“去自述化”而被 Harness 强制重复全量执行
+- 自然语言总结只能辅助审阅，不能单独充当通过判定或分数真相来源
 
 ### 4.4 当前阶段最少必须落地的记录
 
@@ -258,9 +290,10 @@ tests/cases/replays/
 - `TaskSpec` 能从真实 `description.md` 抽取任务目标与 metric
 - `PromptManager` 能对真实 `task_spec/schema/workspace/data_profile` 正常渲染
 - `tool-write` 契约检查器能基于真实 workspace 判断 `solution.py` 是否被成功写出
+- execute 事实采集器能从真实 tool trace / stdout / 文件中恢复首次运行事实
 - submission 校验器能对真实 `sample_submission.csv` 做格式判定
 - `solutions / llm_calls / exec_logs / code_snapshots` 能正确 roundtrip
-- `val_metric_value` 解析器能从 stdout 或结构化结果中抽取分数
+- `val_metric_value` 解析器能从脚本 stdout 或结构化结果中抽取分数
 - `test_score` 评分工具能对真实 `submission.csv` 发起评分并格式化结果
 
 ### 6.2 模块测试
@@ -272,7 +305,7 @@ tests/cases/replays/
 - `FeatureExtractPES.execute` 的输出是否包含有效 TaskSpec 和 data_profile
 - `FeatureExtractPES` 是否能正确选择 GenomeSchema 模板（tabular vs generic）
 - `DraftPES.plan` 的输出是否覆盖任务目标与约束（含 data_profile 消费验证）
-- `DraftPES.execute` 是否能真正通过 tools 写出 `solution.py`
+- `DraftPES.execute` 是否能真正通过 tools 写出 `solution.py` 并记录首次运行事实
 - `DraftPES.summarize` 的结论是否忠实于执行日志
 
 ### 6.3 集成测试
@@ -415,4 +448,4 @@ Herald2 必须提供一个独立的 `test_score` 获取链路，用于对 `submi
 
 Herald2 的 `evolve` 基础不是“更复杂的搜索策略”，而是：
 
-**先把 `val_metric_value`、`test_score`、代码工件、执行日志、评分结果和真实测试用例资产全部沉淀下来，再在这个可回放、可观测、可评测的 Harness 上继续演化。**
+**先把由脚本真实运行产生的 `val_metric_value`、`test_score`、代码工件、执行日志、评分结果和真实测试用例资产全部沉淀下来，再在这个可回放、可观测、可评测的 Harness 上继续演化。**

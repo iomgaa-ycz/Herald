@@ -1312,19 +1312,26 @@ ConfigManager
 ### 6.7 Task 7：执行 `solution.py` 并记录 `exec_logs`
 
 **状态**: ⬜ 待实现
-**目标**: 让系统真正运行生成代码，而不是停在代码落盘。
+**目标**: 让系统拿到并持久化生成代码的首次真实执行事实，而不是停在代码落盘，也不是依赖模型自然语言自评。
 
 **任务是什么**
 
-- 在工作空间内执行 `working/solution.py`
-- 记录执行命令、stdout、stderr、exit_code、duration
+- 由 Agent 在 `execute` phase 中真实运行 `working/solution.py`
+- 记录首次真实运行的执行命令、stdout、stderr、exit_code、duration
 
 **要干什么**
 
-- 在 `DraftPES` 或其辅助执行器中增加本地执行步骤
+- 在 `DraftPES` 中接入 execute 阶段运行事实的采集与持久化
 - 将 `prepared/public` 作为只读数据来源暴露给运行代码
 - 统一记录执行日志到 `exec_logs`
+- 明确以工件与机器输出作为事实来源，不以模型自然语言“我成功了/我更好了”作为通过依据
 - 运行失败时更新 `solution.status = "failed"` 并保留执行痕迹
+
+**约束**
+
+- Task 7 的主目标是记录 execute 阶段的首次真实运行事实
+- 不要求 Harness 仅为了验证而对同一高成本脚本强制二次完整重跑
+- 若后续确实需要系统侧复跑，只能作为显式调试 / 回放能力，不能设为默认主链路
 
 **涉及文件**
 
@@ -1334,9 +1341,9 @@ ConfigManager
 
 **必过测试**
 
-- `tests/unit/test_exec_runner.py`
+- `tests/unit/test_execute_fact_capture.py`
 - `tests/unit/test_database_roundtrip.py`
-- `tests/integration/test_draft_pes_runtime_flow.py`
+- `tests/integration/test_draft_pes_execute_fact_flow.py`
 
 **测试用例**
 
@@ -1364,6 +1371,7 @@ ConfigManager
 
 - 约定 execute 成功脚本的最小输出协议
 - 为 tabular case 实现 `val_metric_value` 提取
+- 优先从脚本 stdout / JSON / 落盘文件中提取分数事实，而不是读取模型自然语言总结
 - 按 `docs/evolve.md` 的契约，保证 `fitness` 来自 `val_metric_value`
 - 将分数字段同步更新到 `solutions`
 

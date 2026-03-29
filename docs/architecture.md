@@ -1,7 +1,7 @@
 # Herald2 系统架构
 
 > **版本**: v0.1
-> **更新**: 2026-03-28
+> **更新**: 2026-03-29
 > **定位**: Herald2 的唯一系统架构基线
 
 ---
@@ -85,6 +85,12 @@ Herald2 的真实底座是：
 - `HeraldDB` 负责状态与知识
 - `PromptManager` 负责首次上下文装配
 - `EventBus` 负责流程编排
+
+这里还要明确一个事实来源原则：
+
+- 不可信的是模型用自然语言给自己下结论，例如“我成功了”“这次更优了”
+- 可信的是 execute 阶段通过 tools 真实产出的工件与机器事实，例如 `solution.py`、`submission.csv`、stdout/stderr、脚本打印出的 `fitness`
+- Harness 的职责是沉淀这些事实，而不是为了“去除自述”默认把高成本脚本再完整重跑一遍
 
 ### 3.4 先单机串行，后多 Agent 并行
 
@@ -474,9 +480,11 @@ task_stages = [
 1. 建立 execute 阶段的 `tool-write` 契约
 2. 严格校验 `working/solution.py` 已被 tools 写出且非空
 3. 保存 `code_snapshots`
-4. 执行代码
-5. 记录 `exec_logs`
+4. 记录 execute 阶段首次真实运行的执行事实
+5. 保存 `exec_logs`
 6. 解析 metrics / submission 路径
+
+这里的“记录执行事实”优先复用 Agent 在 execute phase 中对最终 `solution.py` 的真实运行结果，而不是默认由 Harness 再次完整重跑同一份竞赛脚本。
 
 ### 9.3 P0：让 Workspace 与 DB 真正闭环
 
@@ -523,7 +531,7 @@ task_stages = [
 |---|---|---|
 | M0-now | 单 `DraftPES` 调用链打通 | 已完成 |
 | M0.3 | FeatureExtractPES + GenomeSchema 模板 | `FeatureExtractPES` 数据分析与 TaskSpec 生成、`task_stages` 调度、tabular/generic 模板、DraftPES 消费 data_profile |
-| M0.5 | 真实代码落盘与执行验证 | `tool-write` 契约、`solution.py` 写入、执行、metrics、submission、`exec_logs` |
+| M0.5 | 真实代码落盘、首次执行与事实记录 | `tool-write` 契约、`solution.py` 写入、execute 首次运行事实、metrics、submission、`exec_logs` |
 | M1 | 单谱系进化 | `MutatePES`、parent/child、genes/snapshots 真接入 |
 | M2 | 完整方案级搜索骨架 | `MergePES`、L2/L3 回流、schema 驱动搜索 |
 | M3 | 并行与编排 | 多任务调度、预算管理、并行执行 |
@@ -535,7 +543,7 @@ task_stages = [
 
 因为：
 
-- 没有真实执行，就没有真实反馈
+- 没有真实执行事实，就没有真实反馈
 - 没有真实反馈，就没有 fitness
 - 没有 fitness，就没有真正的进化
 
