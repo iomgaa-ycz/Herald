@@ -57,6 +57,7 @@ class DummyLLM:
         """记录调用并返回固定响应。"""
 
         self.calls.append({"prompt": prompt, **kwargs})
+        turns: list[dict[str, object]] = []
         if (
             self.execute_code is not None
             and isinstance(kwargs.get("cwd"), str)
@@ -64,13 +65,31 @@ class DummyLLM:
         ):
             solution_path = Path(kwargs["cwd"]) / "solution.py"
             solution_path.write_text(self.execute_code, encoding="utf-8")
+            turns = [
+                {
+                    "role": "assistant",
+                    "text": "已写入并执行 solution.py。",
+                    "tool_calls": [
+                        {
+                            "name": "Bash",
+                            "input": {"command": "python solution.py"},
+                            "result": {
+                                "stdout": "ok\n",
+                                "stderr": "",
+                                "exit_code": 0,
+                                "duration_ms": 10,
+                            },
+                        }
+                    ],
+                }
+            ]
 
         if self._index < len(self.responses):
             result = self.responses[self._index]
         else:
             result = "ok"
         self._index += 1
-        return DummyResponse(result=result, turns=[])
+        return DummyResponse(result=result, turns=turns)
 
 
 class DummyPromptManager:
@@ -133,6 +152,16 @@ class DummyWorkspace:
         if not code.strip():
             raise ValueError(f"代码文件为空: {file_path}")
         return code
+
+    def get_working_submission_path(self, file_name: str = "submission.csv") -> Path:
+        """返回 working/ 下的 submission 路径。"""
+
+        return self.working_dir / file_name
+
+    def read_runtime_artifact(self, file_name: str) -> str | None:
+        """读取运行时文本工件。"""
+
+        return self.read_working_text(file_name)
 
 
 class PassthroughPES(BasePES):
@@ -413,7 +442,8 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
 
     assert solution.status == "completed"
     assert solution.plan_summary == "ok"
-    assert "working/solution.py" in solution.execute_summary
+    assert "python solution.py" in solution.execute_summary
+    assert "exit_code=0" in solution.execute_summary
     assert solution.summarize_insight == "ok"
     assert set(solution.phase_outputs.keys()) == {"plan", "execute", "summarize"}
     assert solution.solution_file_path == str(workspace.working_dir / "solution.py")

@@ -149,10 +149,8 @@ def test_execute_reads_non_empty_solution_file_from_workspace(tmp_path: Path) ->
     asyncio.run(pes.execute_phase(solution))
 
     assert workspace.read_working_solution() == solution_code
-    assert (
-        solution.execute_summary
-        == "工具已成功写出 working/solution.py，并通过语法校验。"
-    )
+    assert "python solution.py" in solution.execute_summary
+    assert "exit_code=0" in solution.execute_summary
     assert solution.solution_file_path == str(
         workspace.get_working_file_path("solution.py")
     )

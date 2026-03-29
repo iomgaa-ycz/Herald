@@ -58,6 +58,7 @@ class SequencedLLM:
         """返回当前序号的响应。"""
 
         self.calls.append({"prompt": prompt, **kwargs})
+        turns: list[dict[str, object]] = []
         if (
             self.execute_code is not None
             and isinstance(kwargs.get("cwd"), str)
@@ -67,9 +68,27 @@ class SequencedLLM:
                 self.execute_code,
                 encoding="utf-8",
             )
+            turns = [
+                {
+                    "role": "assistant",
+                    "text": "已执行 solution.py。",
+                    "tool_calls": [
+                        {
+                            "name": "Bash",
+                            "input": {"command": "python solution.py"},
+                            "result": {
+                                "stdout": "ok\n",
+                                "stderr": "",
+                                "exit_code": 0,
+                                "duration_ms": 15,
+                            },
+                        }
+                    ],
+                }
+            ]
         result = self.responses[self._index]
         self._index += 1
-        return DummyResponse(result=result, turns=[])
+        return DummyResponse(result=result, turns=turns)
 
 
 def _build_prompt_manager() -> PromptManager:

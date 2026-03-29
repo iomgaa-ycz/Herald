@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +55,11 @@ class DraftPES(BasePES):
         if phase == "plan":
             solution.plan_summary = response_text
         elif phase == "execute":
-            return self._handle_execute_response(solution, response_text)
+            return self._handle_execute_response(
+                solution=solution,
+                response=response,
+                response_text=response_text,
+            )
         elif phase == "summarize":
             solution.summarize_insight = response_text
             solution.status = "completed"
@@ -70,25 +76,346 @@ class DraftPES(BasePES):
     def _handle_execute_response(
         self,
         solution: PESSolution,
+        response: object,
         response_text: str,
     ) -> dict[str, Any]:
-        """处理 execute 阶段的 tool-write 契约。"""
+        """处理 execute 阶段的 tool-write 契约与首次运行事实。"""
 
         self._attach_workspace_artifacts(solution)
         self._assert_tool_write_contract(solution)
         code = self._load_written_solution_code(solution)
         self._validate_python_code(solution=solution, code=code)
         self._persist_code_snapshot(solution=solution, code=code)
-        solution.execute_summary = (
-            "工具已成功写出 working/solution.py，并通过语法校验。"
-        )
+        exec_result = self._extract_execute_fact(response)
+        self._assert_execute_fact_matches_final_solution(solution, exec_result)
+        exec_result = self._fill_exec_fact_from_runtime_artifacts(exec_result)
+        self._persist_exec_log(solution=solution, exec_result=exec_result)
+        solution.execute_summary = self._format_execute_summary(exec_result)
+
+        exit_code = exec_result["exit_code"]
+        if exit_code != 0:
+            raise ValueError(f"solution.py 首次运行失败：{solution.execute_summary}")
 
         return {
             "phase": "execute",
             "response_text": response_text,
             "code": code,
             "solution_file_path": solution.solution_file_path,
+            "exec_result": exec_result,
         }
+
+    def _extract_execute_fact(self, response: object) -> dict[str, Any]:
+        """从 execute phase 的真实工具轨迹中提取首次运行事实。"""
+
+        turns = getattr(response, "turns", None)
+        if not isinstance(turns, list):
+            raise ValueError("execute 响应缺少 turns，无法提取首次运行事实")
+
+        fallback_fact: dict[str, Any] | None = None
+        for turn in turns:
+            if not isinstance(turn, dict):
+                continue
+            tool_calls = turn.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                continue
+
+            for tool_call in tool_calls:
+                fact = self._parse_exec_fact_from_tool_call(tool_call)
+                if fact is None:
+                    continue
+                if self._command_targets_solution_file(str(fact["command"]), None):
+                    return fact
+                if fallback_fact is None:
+                    fallback_fact = fact
+
+        if fallback_fact is not None:
+            return fallback_fact
+        raise ValueError("未从 execute turns 中提取到 solution.py 的真实运行事实")
+
+    def _parse_exec_fact_from_tool_call(
+        self,
+        tool_call: object,
+    ) -> dict[str, Any] | None:
+        """从单次工具调用中提取执行事实。"""
+
+        if not isinstance(tool_call, dict):
+            return None
+
+        tool_input = tool_call.get("input")
+        if not isinstance(tool_input, dict):
+            return None
+
+        command = self._normalize_command(
+            self._first_non_none(
+                tool_input.get("command"),
+                tool_input.get("cmd"),
+                tool_input.get("argv"),
+                tool_input.get("args"),
+            )
+        )
+        if command is None:
+            return None
+
+        result_payload = self._normalize_tool_result(tool_call.get("result"))
+        exit_code = self._coerce_int(
+            self._first_non_none(
+                result_payload.get("exit_code"),
+                tool_call.get("exit_code"),
+            )
+        )
+        duration_ms = self._coerce_float(
+            self._first_non_none(
+                result_payload.get("duration_ms"),
+                result_payload.get("duration"),
+                tool_call.get("duration_ms"),
+            )
+        )
+        stdout = self._coerce_optional_text(
+            self._first_non_none(
+                result_payload.get("stdout"),
+                tool_call.get("stdout"),
+            )
+        )
+        stderr = self._coerce_optional_text(
+            self._first_non_none(
+                result_payload.get("stderr"),
+                tool_call.get("stderr"),
+            )
+        )
+
+        if exit_code is None:
+            return None
+
+        return {
+            "command": command,
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code,
+            "duration_ms": duration_ms,
+        }
+
+    def _normalize_tool_result(self, result: object) -> dict[str, Any]:
+        """将工具结果归一化为字典结构。"""
+
+        if isinstance(result, dict):
+            return result
+
+        if isinstance(result, list):
+            merged: dict[str, Any] = {}
+            text_fragments: list[str] = []
+            for item in result:
+                if isinstance(item, dict):
+                    merged.update(
+                        {
+                            key: value
+                            for key, value in item.items()
+                            if key
+                            in {"stdout", "stderr", "exit_code", "duration_ms", "text"}
+                        }
+                    )
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        text_fragments.append(text.strip())
+                elif isinstance(item, str) and item.strip():
+                    text_fragments.append(item.strip())
+            if text_fragments and "stdout" not in merged:
+                merged["stdout"] = "\n".join(text_fragments)
+            return merged
+
+        if isinstance(result, str):
+            return {"stdout": result}
+
+        return {}
+
+    def _normalize_command(self, command: object) -> str | None:
+        """将工具输入中的命令归一化为字符串。"""
+
+        if isinstance(command, str):
+            normalized = command.strip()
+            return normalized or None
+        if isinstance(command, list):
+            parts = [str(part).strip() for part in command if str(part).strip()]
+            if not parts:
+                return None
+            return " ".join(parts)
+        return None
+
+    def _first_non_none(self, *values: object) -> object | None:
+        """返回第一个非 None 值。"""
+
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
+    def _coerce_int(self, value: object) -> int | None:
+        """将值转换为整数。"""
+
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                return None
+        return None
+
+    def _coerce_float(self, value: object) -> float | None:
+        """将值转换为浮点数。"""
+
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None
+
+    def _coerce_optional_text(self, value: object) -> str | None:
+        """将值转换为可选文本。"""
+
+        if value is None:
+            return None
+        text = str(value)
+        return text
+
+    def _assert_execute_fact_matches_final_solution(
+        self,
+        solution: PESSolution,
+        exec_fact: dict[str, Any],
+    ) -> None:
+        """确认执行事实对应最终的 working/solution.py。"""
+
+        solution_path = solution.solution_file_path
+        if solution_path is None:
+            raise ValueError("solution_file_path 为空，无法校验执行事实")
+
+        if not self._command_targets_solution_file(
+            command=str(exec_fact["command"]),
+            solution_path=Path(solution_path),
+        ):
+            raise ValueError(f"执行事实未指向最终 solution.py：{exec_fact['command']}")
+
+    def _command_targets_solution_file(
+        self,
+        command: str,
+        solution_path: Path | None,
+    ) -> bool:
+        """判断命令是否在运行目标 solution.py。"""
+
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            parts = command.split()
+
+        working_dir = getattr(self.workspace, "working_dir", None)
+        workspace_dir = (
+            Path(working_dir).resolve()
+            if isinstance(working_dir, (str, Path))
+            else None
+        )
+        expected_path = solution_path.resolve() if solution_path is not None else None
+
+        for part in parts:
+            if not part.endswith(".py"):
+                continue
+            candidate = Path(part)
+            if not candidate.is_absolute() and workspace_dir is not None:
+                candidate = (workspace_dir / candidate).resolve()
+            elif candidate.is_absolute():
+                candidate = candidate.resolve()
+
+            if expected_path is not None and candidate == expected_path:
+                return True
+            if (
+                expected_path is None
+                and candidate.name == self.config.solution_file_name
+            ):
+                return True
+
+        return False
+
+    def _fill_exec_fact_from_runtime_artifacts(
+        self,
+        exec_fact: dict[str, Any],
+    ) -> dict[str, Any]:
+        """使用运行时工件补全缺失的 stdout/stderr。"""
+
+        if self.workspace is None or not hasattr(
+            self.workspace, "read_runtime_artifact"
+        ):
+            return exec_fact
+
+        read_artifact = self.workspace.read_runtime_artifact
+        if not callable(read_artifact):
+            return exec_fact
+
+        filled_fact = dict(exec_fact)
+        if filled_fact.get("stdout") in (None, ""):
+            filled_fact["stdout"] = read_artifact("stdout.log")
+        if filled_fact.get("stderr") in (None, ""):
+            filled_fact["stderr"] = read_artifact("stderr.log")
+
+        metrics_raw = read_artifact("metrics.json")
+        if metrics_raw:
+            try:
+                metrics = json.loads(metrics_raw)
+            except json.JSONDecodeError:
+                metrics = None
+            if isinstance(metrics, dict):
+                filled_fact["metrics"] = metrics
+
+        return filled_fact
+
+    def _persist_exec_log(
+        self,
+        solution: PESSolution,
+        exec_result: dict[str, Any],
+    ) -> None:
+        """将首次运行事实写入 exec_logs。"""
+
+        if self.db is None or not hasattr(self.db, "log_exec"):
+            return
+
+        self.db.log_exec(
+            solution_id=solution.id,
+            command=str(exec_result["command"]),
+            stdout=self._coerce_optional_text(exec_result.get("stdout")),
+            stderr=self._coerce_optional_text(exec_result.get("stderr")),
+            exit_code=self._coerce_int(exec_result.get("exit_code")),
+            duration_ms=self._coerce_float(exec_result.get("duration_ms")),
+            metrics=(
+                exec_result.get("metrics")
+                if isinstance(exec_result.get("metrics"), dict)
+                else None
+            ),
+        )
+
+    def _format_execute_summary(self, exec_result: dict[str, Any]) -> str:
+        """生成简洁的人类可读执行摘要。"""
+
+        exit_code = self._coerce_int(exec_result.get("exit_code"))
+        duration_ms = self._coerce_float(exec_result.get("duration_ms"))
+        duration_text = (
+            "unknown"
+            if duration_ms is None
+            else str(int(duration_ms))
+            if duration_ms.is_integer()
+            else f"{duration_ms:.1f}"
+        )
+        return (
+            f"已记录首次运行事实：{exec_result['command']} "
+            f"(exit_code={exit_code}, duration_ms={duration_text})"
+        )
 
     def _extract_response_text(self, response: object) -> str:
         """提取模型响应文本。"""
@@ -238,6 +565,12 @@ class DraftPES(BasePES):
         solution.solution_file_path = str(solution_path)
 
         if self.config.submission_file_name:
-            submission_path = working_dir_path / self.config.submission_file_name
+            get_submission_path = getattr(
+                self.workspace, "get_working_submission_path", None
+            )
+            if callable(get_submission_path):
+                submission_path = get_submission_path(self.config.submission_file_name)
+            else:
+                submission_path = working_dir_path / self.config.submission_file_name
             solution.submission_file_path = str(submission_path)
         self._persist_solution_artifacts(solution)
