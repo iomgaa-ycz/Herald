@@ -8,8 +8,8 @@ phases:
     template_name: null
     tool_names: []
     max_retries: 1
-    allowed_tools: []
-    max_turns: 1
+    allowed_tools: ["Read", "Glob", "Grep"]
+    max_turns: 3
 
   execute:
     template_name: null
