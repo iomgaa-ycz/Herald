@@ -99,7 +99,7 @@ Herald2 必须把一次完整运行拆成以下记录单元：
 | FeatureExtract Execute | 数据探索命令与输出、TaskSpec JSON、data_profile 报告、GenomeSchema 模板选择 | `llm_calls` + `working/task_spec.json` + `working/data_profile.md` | 查 DB / 看 `working/` |
 | FeatureExtract Summarize | 数据特征总结、关键发现、建模建议 | `llm_calls` + 日志 | 查 DB / 读日志 |
 | Draft Plan Phase | prompt、agent profile、模型、tokens、latency、原始输出、plan 摘要 | `llm_calls` + 日志 | 查 DB / 读日志 |
-| Draft Execute Phase | 原始输出、提取出的代码块、`solution.py`、执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
+| Draft Execute Phase | 原始输出、tool 调用轨迹、`solution.py`、契约检查结果、执行命令、stdout、stderr、exit code、duration、`val_metric_value`、`submission.csv` 路径 | `llm_calls` + `contract_checks` + `code_snapshots` + `exec_logs` + 文件工件 | 查 DB / 看 `working/` |
 | Draft Summarize Phase | summarize prompt、原始输出、最终 insight、下轮建议 | `llm_calls` + 报告文件 | 查 DB / 读报告 |
 | 外部评分 | `test_score`、方向、奖牌、阈值、是否有效提交 | 独立评分结果 + 日志 + solution metadata | 看评分报告 / 查结果 |
 
@@ -203,13 +203,14 @@ tests/cases/replays/
   draft_success_tabular_v1/
     input.json
     plan.txt
-    execute_raw.txt
+    turns.json
     solution.py
     stdout.log
     stderr.log
     submission.csv
     expected.json
-  draft_no_code_block_v1/
+  draft_missing_solution_file_v1/
+  draft_empty_solution_file_v1/
   draft_syntax_error_v1/
   draft_submission_schema_error_v1/
   draft_runtime_error_v1/
@@ -231,7 +232,8 @@ tests/cases/replays/
 **DraftPES 回放：**
 
 - 成功生成可评分 submission 的 case
-- 无代码块 case
+- 未写出 `solution.py` 的 case
+- 写出了空 `solution.py` 的 case
 - Python 语法错误 case
 - 运行时报错 case
 - submission schema 错误 case
@@ -255,7 +257,7 @@ tests/cases/replays/
 - `GenomeSchema` 模板加载能根据 task_type 返回正确的模板（tabular / generic）
 - `TaskSpec` 能从真实 `description.md` 抽取任务目标与 metric
 - `PromptManager` 能对真实 `task_spec/schema/workspace/data_profile` 正常渲染
-- execute 输出解析器能从真实 `execute_raw.txt` 提取代码块
+- `tool-write` 契约检查器能基于真实 workspace 判断 `solution.py` 是否被成功写出
 - submission 校验器能对真实 `sample_submission.csv` 做格式判定
 - `solutions / llm_calls / exec_logs / code_snapshots` 能正确 roundtrip
 - `val_metric_value` 解析器能从 stdout 或结构化结果中抽取分数
@@ -270,7 +272,7 @@ tests/cases/replays/
 - `FeatureExtractPES.execute` 的输出是否包含有效 TaskSpec 和 data_profile
 - `FeatureExtractPES` 是否能正确选择 GenomeSchema 模板（tabular vs generic）
 - `DraftPES.plan` 的输出是否覆盖任务目标与约束（含 data_profile 消费验证）
-- `DraftPES.execute` 的输出是否能真正落成 `solution.py`
+- `DraftPES.execute` 是否能真正通过 tools 写出 `solution.py`
 - `DraftPES.summarize` 的结论是否忠实于执行日志
 
 ### 6.3 集成测试

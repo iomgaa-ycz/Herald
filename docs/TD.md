@@ -613,8 +613,7 @@ class DraftPES(BasePES):
 ### 当前待补
 
 - 消费 FeatureExtractPES 产出的 `task_spec` / `data_profile` / `schema`（通过 Scheduler 注入的 dispatch context）
-- 从 execute 原始输出中提取代码块
-- 把真实代码写入 `working/solution.py`
+- 建立 execute 阶段的 `tool-write` 契约：Agent 必须在工作空间用 tools 写出真实 `working/solution.py`
 - 运行 `solution.py`
 - 提取 `val_metric_value`
 - 生成真实 `submission.csv`
@@ -828,8 +827,8 @@ class LLMClient:
 
 ### 当前阶段要求
 
-- `result` 必须可被 `DraftPES` 直接消费
-- `turns` 必须可用于后续回放与 deepeval 审阅
+- `result` 仅作为文本摘要与人工审阅材料，不作为代码真相来源
+- `turns` 必须完整保留 tool 调用痕迹，用于回放、契约检查与 deepeval 审阅
 - `cwd/env` 透传必须可靠
 
 ### 验证 Checkpoint
@@ -1265,24 +1264,24 @@ ConfigManager
 - 工作空间根目录存在 `metadata.json`，含 `run_id`、`started_at`
 - run 结束后 `metadata.json` 含 `finished_at`
 
-### 6.6 Task 6：Execute 输出解析并落盘真实 `solution.py`
+### 6.6 Task 6：建立 Tool-Write 契约并落盘真实 `solution.py`
 
 **状态**: ⬜ 待实现
-**目标**: 把 execute 阶段从“只有 LLM 原始文本”推进到“可执行代码落盘”。
+**目标**: 把 execute 阶段从“工具能力可选”推进到“`tool-write` 成功写出代码才算 execute 成功”。
 
 **任务是什么**
 
-- 从 execute 原始输出中提取 Python 代码块
-- 将代码写入 `working/solution.py`
-- 把完整代码写入 `code_snapshots`
+- 要求 Agent 在 execute 阶段通过 tools 写出真实 `working/solution.py`
+- 在 phase 结束后严格校验 `working/solution.py` 是否存在且非空
+- 将该文件内容写入 `code_snapshots`
 
 **要干什么**
 
-- 在 `DraftPES.handle_phase_response()` 中增加 execute 输出解析
-- 增加“提取代码块”能力，优先读取 ```python fenced code block
-- 提取失败时，明确把 solution 置为失败并记录原因
-- 写入真实 `working/solution.py`
+- 在 `DraftPES.handle_phase_response()` 中增加 `tool-write` 契约检查
+- execute 结束后从工作空间读取 `working/solution.py`，并做最小语法校验
+- `solution.py` 缺失、为空或语法不合法时，明确把 solution 置为失败并记录原因
 - 同步保存完整代码快照到数据库
+- 明确禁止使用最终输出文本做代码恢复或兜底
 
 **涉及文件**
 
@@ -1293,20 +1292,21 @@ ConfigManager
 
 **必过测试**
 
-- `tests/unit/test_execute_output_parser.py`
+- `tests/unit/test_tool_write_contract.py`
 - `tests/unit/test_database_roundtrip.py`
-- `tests/integration/test_draft_pes_mvp_flow.py`
+- `tests/integration/test_draft_pes_tool_write_flow.py`
 
 **测试用例**
 
-- `tests/cases/replays/draft_success_tabular_v1/execute_raw.txt`
-- `tests/cases/replays/draft_no_code_block_v1/execute_raw.txt`
-- `tests/cases/replays/draft_syntax_error_v1/execute_raw.txt`
+- `tests/cases/replays/draft_success_tabular_v1/turns.json`
+- `tests/cases/replays/draft_missing_solution_file_v1/turns.json`
+- `tests/cases/replays/draft_empty_solution_file_v1/turns.json`
+- `tests/cases/replays/draft_syntax_error_v1/solution.py`
 
 **测试通过标准**
 
 - success case 能生成非空的 `working/solution.py`
-- no-code-block case 会被明确标记失败，并留下可读错误原因
+- missing/empty `solution.py` case 会被明确标记失败，并留下可读错误原因
 - `code_snapshots` 中存在与 `solution.py` 一致的完整代码内容
 
 ### 6.7 Task 7：执行 `solution.py` 并记录 `exec_logs`
@@ -1377,7 +1377,7 @@ ConfigManager
 
 - `tests/unit/test_metric_extraction.py`
 - `tests/unit/test_solution_model.py`
-- `tests/integration/test_draft_pes_mvp_flow.py`
+- `tests/integration/test_draft_pes_runtime_flow.py`
 
 **测试用例**
 
@@ -1461,7 +1461,7 @@ ConfigManager
 
 - `tests/unit/test_workspace.py`
 - `tests/unit/test_database_roundtrip.py`
-- `tests/integration/test_draft_pes_mvp_flow.py`
+- `tests/integration/test_draft_pes_runtime_flow.py`
 
 **测试用例**
 
@@ -1555,7 +1555,8 @@ ConfigManager
   - `spaceship-titanic`
 - 回放集：
   - `draft_success_tabular_v1`
-  - `draft_no_code_block_v1`
+  - `draft_missing_solution_file_v1`
+  - `draft_empty_solution_file_v1`
   - `draft_syntax_error_v1`
   - `draft_runtime_error_v1`
   - `draft_submission_schema_error_v1`
@@ -1579,7 +1580,7 @@ ConfigManager
 - `tests/unit/test_draft_pes.py`
 - `tests/unit/test_prompt_manager.py`
 - `tests/unit/test_task_spec_schema.py`
-- `tests/unit/test_execute_output_parser.py`
+- `tests/unit/test_tool_write_contract.py`
 - `tests/unit/test_exec_runner.py`
 - `tests/unit/test_metric_extraction.py`
 - `tests/unit/test_submission_validator.py`
@@ -1593,7 +1594,7 @@ ConfigManager
 - `tests/integration/test_feature_extract_draft_pipeline.py` [NEW]
 - `tests/integration/test_dispatch_flow.py`
 - `tests/integration/test_scheduler_flow.py`
-- `tests/integration/test_draft_pes_mvp_flow.py`
+- `tests/integration/test_draft_pes_tool_write_flow.py`
 - `tests/integration/test_draft_pes_runtime_flow.py`
 - `tests/integration/test_draft_pes_grading_flow.py`
 - `tests/integration/test_draft_pes_real_cases.py`

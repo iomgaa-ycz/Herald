@@ -249,7 +249,7 @@ DraftPES.run()
 - `Scheduler` 是**串行**的，不是并行的
 - `EventBus` 是**进程内总线**，不是分布式消息系统
 - `AgentRegistry` 当前加载的是**prompt persona**，不是独立 Agent 进程
-- `execute` 阶段目前**还不会把模型输出解析成真实代码再执行**
+- 当前实现还未接通 Draft execute 的正式代码契约；本架构基线要求后续一律以 tools 成功写出的 `working/solution.py` 作为代码真相来源，禁止输出解析兜底
 
 所以当前系统更准确的定义是：
 
@@ -471,8 +471,8 @@ task_stages = [
 
 必须尽快补成：
 
-1. 从模型输出提取代码块
-2. 写入 `working/solution.py`
+1. 建立 execute 阶段的 `tool-write` 契约
+2. 严格校验 `working/solution.py` 已被 tools 写出且非空
 3. 保存 `code_snapshots`
 4. 执行代码
 5. 记录 `exec_logs`
@@ -523,7 +523,7 @@ task_stages = [
 |---|---|---|
 | M0-now | 单 `DraftPES` 调用链打通 | 已完成 |
 | M0.3 | FeatureExtractPES + GenomeSchema 模板 | `FeatureExtractPES` 数据分析与 TaskSpec 生成、`task_stages` 调度、tabular/generic 模板、DraftPES 消费 data_profile |
-| M0.5 | 真实代码落盘与执行验证 | `solution.py` 写入、执行、metrics、submission、`exec_logs` |
+| M0.5 | 真实代码落盘与执行验证 | `tool-write` 契约、`solution.py` 写入、执行、metrics、submission、`exec_logs` |
 | M1 | 单谱系进化 | `MutatePES`、parent/child、genes/snapshots 真接入 |
 | M2 | 完整方案级搜索骨架 | `MergePES`、L2/L3 回流、schema 驱动搜索 |
 | M3 | 并行与编排 | 多任务调度、预算管理、并行执行 |
