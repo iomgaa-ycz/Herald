@@ -19,6 +19,7 @@ class TracingRepository(BaseRepository):
         model: str | None = None,
         input_messages: list[dict[str, Any]] | None = None,
         output_text: str | None = None,
+        turns: list[dict[str, Any]] | None = None,
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         latency_ms: float | None = None,
@@ -29,9 +30,9 @@ class TracingRepository(BaseRepository):
             """
             INSERT INTO llm_calls (
                 id, solution_id, phase, purpose, model,
-                input_messages_json, output_text, tokens_in,
+                input_messages_json, output_text, turns_json, tokens_in,
                 tokens_out, latency_ms, cost_usd, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
@@ -41,6 +42,7 @@ class TracingRepository(BaseRepository):
                 model,
                 json.dumps(input_messages) if input_messages is not None else None,
                 output_text,
+                json.dumps(turns) if turns is not None else None,
                 tokens_in,
                 tokens_out,
                 latency_ms,
@@ -120,6 +122,11 @@ class TracingRepository(BaseRepository):
                     row["input_messages"] = json.loads(row["input_messages_json"])
                 except Exception:
                     row["input_messages"] = None
+            if row.get("turns_json"):
+                try:
+                    row["turns"] = json.loads(row["turns_json"])
+                except Exception:
+                    row["turns"] = None
         return rows
 
     def get_exec_logs(self, solution_id: str) -> list[dict]:

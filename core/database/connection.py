@@ -28,6 +28,13 @@ class DatabaseConnection:
         for idx_sql in INDEXES:
             cursor.execute(idx_sql)
         cursor.execute(VIEW_GENERATION_STATS)
+
+        # 迁移：为旧数据库添加 turns_json 列
+        try:
+            cursor.execute("ALTER TABLE llm_calls ADD COLUMN turns_json TEXT")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+
         self.conn.commit()
 
     @contextmanager

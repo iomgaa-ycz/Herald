@@ -69,7 +69,7 @@ class LLMClient:
             cwd=cwd,
             env=env or {},
             mcp_servers=mcp_servers or {},
-            setting_sources=["user", "project", "local"],
+            setting_sources=[],
         )
 
     async def execute_task(

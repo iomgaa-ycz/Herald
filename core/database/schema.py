@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     model TEXT,
     input_messages_json TEXT,
     output_text TEXT,
+    turns_json TEXT,
     tokens_in INTEGER,
     tokens_out INTEGER,
     latency_ms REAL,

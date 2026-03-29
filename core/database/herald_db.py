@@ -123,6 +123,11 @@ class HeraldDB:
         with self.transaction():
             return self.tracing.log_exec(**kwargs)
 
+    def get_llm_calls(self, solution_id: str) -> list[dict]:
+        """获取 solution 对应的 LLM 调用记录。"""
+
+        return self.tracing.get_llm_calls(solution_id)
+
     def get_exec_logs(self, solution_id: str) -> list[dict]:
         """获取 solution 对应的执行日志。"""
 
@@ -131,6 +136,11 @@ class HeraldDB:
     def log_contract_check(self, **kwargs: object) -> str:
         with self.transaction():
             return self.tracing.log_contract_check(**kwargs)
+
+    def get_contract_checks(self, solution_id: str) -> list[dict]:
+        """获取 solution 对应的契约检查记录。"""
+
+        return self.tracing.get_contract_checks(solution_id)
 
     def upsert_l2_insight(self, **kwargs: object) -> int:
         with self.transaction():
