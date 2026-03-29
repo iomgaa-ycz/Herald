@@ -42,10 +42,15 @@ class DummyResponse:
 class SequencedLLM:
     """按顺序返回预设响应并记录 Prompt。"""
 
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(
+        self,
+        responses: list[str],
+        execute_code: str | None = None,
+    ) -> None:
         """初始化测试桩。"""
 
         self.responses = responses
+        self.execute_code = execute_code
         self.calls: list[dict[str, object]] = []
         self._index = 0
 
@@ -53,6 +58,15 @@ class SequencedLLM:
         """返回当前序号的响应。"""
 
         self.calls.append({"prompt": prompt, **kwargs})
+        if (
+            self.execute_code is not None
+            and isinstance(kwargs.get("cwd"), str)
+            and "draft_execute" in prompt
+        ):
+            (Path(kwargs["cwd"]) / "solution.py").write_text(
+                self.execute_code,
+                encoding="utf-8",
+            )
         result = self.responses[self._index]
         self._index += 1
         return DummyResponse(result=result, turns=[])
@@ -130,7 +144,15 @@ def test_feature_extract_output_flows_to_draft_context(tmp_path: Path) -> None:
             "总体策略：先做最小 baseline。",
             "## 执行报告\n实现完成。\n\n## 代码实现\n```python\nprint('ok')\n```\n\n## 验证结果\n- 指标名: auc\n- 指标值: 0.50\n- 提交路径: ./submission.csv",
             "总结：baseline 已生成。",
-        ]
+        ],
+        execute_code=(
+            "def solve() -> None:\n"
+            "    print('ok')\n"
+            "\n"
+            "\n"
+            "if __name__ == '__main__':\n"
+            "    solve()\n"
+        ),
     )
 
     feature_extract_pes = FeatureExtractPES(
@@ -164,10 +186,16 @@ def test_feature_extract_output_flows_to_draft_context(tmp_path: Path) -> None:
 
     assert feature_extract_pes.received_execute_event is not None
     assert draft_pes.received_execute_event is not None
-    assert draft_pes.received_execute_event.context["task_spec"]["task_type"] == "tabular"
+    assert (
+        draft_pes.received_execute_event.context["task_spec"]["task_type"] == "tabular"
+    )
     assert "训练集 2 行" in draft_pes.received_execute_event.context["data_profile"]
     assert draft_pes.received_execute_event.context["schema"].task_type == "tabular"
-    assert "def build_model(config: dict[str, object])" in draft_pes.received_execute_event.context["template_content"]
+    assert (
+        "def build_model(config: dict[str, object])"
+        in draft_pes.received_execute_event.context["template_content"]
+    )
     assert "训练集 2 行" in str(draft_llm.calls[0]["prompt"])
     assert "数据概况" in str(draft_llm.calls[0]["prompt"])
     assert "训练集 2 行" in str(draft_llm.calls[1]["prompt"])
+    assert workspace.read_working_solution().startswith("def solve()")

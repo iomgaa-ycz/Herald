@@ -13,7 +13,7 @@ import yaml
 
 from core.agent.profile import AgentProfile
 from core.events.bus import EventBus
-from core.events.types import TaskCompleteEvent
+from core.events.types import TaskCompleteEvent, TaskExecuteEvent
 from core.pes.config import PESConfig, PhaseConfig, load_pes_config
 from core.pes.feature_extract import FeatureExtractPES
 from core.pes.registry import PESRegistry
@@ -201,6 +201,16 @@ def _make_execute_response_text(
     return f"分析完成。\n\n```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```"
 
 
+def _make_execute_event(pes: FeatureExtractPES) -> TaskExecuteEvent:
+    """构造最小 TaskExecuteEvent 以触发完成事件发射。"""
+
+    return TaskExecuteEvent(
+        task_name="feature_extract",
+        target_pes_id=pes.instance_id,
+        generation=0,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 测试用例
 # ---------------------------------------------------------------------------
@@ -335,6 +345,7 @@ def test_handle_summarize_emits_complete() -> None:
         llm=DummyLLM(),
         prompt_manager=DummyPromptManager(),
     )
+    pes.received_execute_event = _make_execute_event(pes)
     solution = pes.create_solution(generation=0)
 
     asyncio.run(
@@ -371,6 +382,7 @@ def test_handle_summarize_emits_output_context(tmp_path: Path) -> None:
         workspace=workspace,
         prompt_manager=DummyPromptManager(),
     )
+    pes.received_execute_event = _make_execute_event(pes)
     solution = pes.create_solution(generation=0)
 
     execute_response = _make_execute_response_text(

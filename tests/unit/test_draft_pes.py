@@ -41,16 +41,36 @@ class DummyResponse:
 class DummyLLM:
     """记录模型调用参数的测试桩。"""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        responses: list[str] | None = None,
+        execute_code: str | None = None,
+    ) -> None:
         """初始化测试桩。"""
 
         self.calls: list[dict[str, object]] = []
+        self.responses = responses or []
+        self.execute_code = execute_code
+        self._index = 0
 
     async def execute_task(self, prompt: str, **kwargs: object) -> DummyResponse:
         """记录调用并返回固定响应。"""
 
         self.calls.append({"prompt": prompt, **kwargs})
-        return DummyResponse(result="ok", turns=[])
+        if (
+            self.execute_code is not None
+            and isinstance(kwargs.get("cwd"), str)
+            and "draft_execute" in prompt
+        ):
+            solution_path = Path(kwargs["cwd"]) / "solution.py"
+            solution_path.write_text(self.execute_code, encoding="utf-8")
+
+        if self._index < len(self.responses):
+            result = self.responses[self._index]
+        else:
+            result = "ok"
+        self._index += 1
+        return DummyResponse(result=result, turns=[])
 
 
 class DummyPromptManager:
@@ -88,6 +108,31 @@ class DummyWorkspace:
             "logs_dir": str(self.logs_dir),
             "db_path": str(self.db_path),
         }
+
+    def get_working_file_path(self, file_name: str) -> Path:
+        """返回 working/ 下的文件路径。"""
+
+        return self.working_dir / file_name
+
+    def read_working_text(self, file_name: str) -> str | None:
+        """读取 working/ 下文本文件。"""
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            return None
+        return file_path.read_text(encoding="utf-8")
+
+    def read_working_solution(self, file_name: str = "solution.py") -> str:
+        """读取工作区中的 solution.py。"""
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            raise ValueError(f"工作区未找到代码文件: {file_path}")
+
+        code = file_path.read_text(encoding="utf-8")
+        if not code.strip():
+            raise ValueError(f"代码文件为空: {file_path}")
+        return code
 
 
 class PassthroughPES(BasePES):
@@ -335,8 +380,18 @@ def test_draft_pes_handle_phase_response_updates_solution() -> None:
 def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
     """`DraftPES` 能结合真实 PromptManager 走完三阶段。"""
 
-    llm = DummyLLM()
     workspace = _build_workspace(tmp_path)
+    llm = DummyLLM(
+        responses=["ok", "执行完成", "ok"],
+        execute_code=(
+            "def solve() -> None:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            'if __name__ == "__main__":\n'
+            "    solve()\n"
+        ),
+    )
     pes = DraftPES(
         config=load_pes_config("config/pes/draft.yaml"),
         llm=llm,
@@ -358,13 +413,14 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
 
     assert solution.status == "completed"
     assert solution.plan_summary == "ok"
-    assert solution.execute_summary == "ok"
+    assert "working/solution.py" in solution.execute_summary
     assert solution.summarize_insight == "ok"
     assert set(solution.phase_outputs.keys()) == {"plan", "execute", "summarize"}
     assert solution.solution_file_path == str(workspace.working_dir / "solution.py")
     assert solution.submission_file_path == str(
         workspace.working_dir / "submission.csv"
     )
+    assert workspace.read_working_solution().startswith("def solve()")
     assert len(llm.calls) == 3
     assert "draft_plan" in str(llm.calls[0]["prompt"])
     assert "draft_execute" in str(llm.calls[1]["prompt"])
