@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from core.database.connection import DatabaseConnection
 from core.database.queries import LineageQueries, PopulationQueries
@@ -47,7 +48,7 @@ class HeraldDB:
     # 便捷方法
     # -----------------------------
 
-    def insert_solution(self, solution) -> None:
+    def insert_solution(self, solution: dict[str, Any]) -> None:
         with self.transaction():
             self.solutions.insert(solution)
 
@@ -109,19 +110,24 @@ class HeraldDB:
     def get_full_code(self, solution_id: str) -> str | None:
         return self.snapshots.get_full_code(solution_id)
 
-    def log_llm_call(self, **kwargs) -> str:
+    def get_latest_code_snapshot(self, solution_id: str) -> dict | None:
+        """获取 solution 最新代码快照。"""
+
+        return self.snapshots.get_latest(solution_id)
+
+    def log_llm_call(self, **kwargs: object) -> str:
         with self.transaction():
             return self.tracing.log_llm_call(**kwargs)
 
-    def log_exec(self, **kwargs) -> str:
+    def log_exec(self, **kwargs: object) -> str:
         with self.transaction():
             return self.tracing.log_exec(**kwargs)
 
-    def log_contract_check(self, **kwargs) -> str:
+    def log_contract_check(self, **kwargs: object) -> str:
         with self.transaction():
             return self.tracing.log_contract_check(**kwargs)
 
-    def upsert_l2_insight(self, **kwargs) -> int:
+    def upsert_l2_insight(self, **kwargs: object) -> int:
         with self.transaction():
             return self.l2.upsert_insight(**kwargs)
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.agent.profile import AgentProfile
 from core.events.bus import EventBus
-from core.events.types import TaskExecuteEvent
+from core.events.types import TaskCompleteEvent, TaskExecuteEvent
 from core.pes.config import PESConfig
 from core.pes.hooks import (
     FailureHookContext,
@@ -112,11 +112,30 @@ class BasePES(ABC):
         self._current_agent = event.agent
         self._execution_context = dict(event.context)
         asyncio.create_task(
-            self.run(
+            self._run_from_event(
                 agent_profile=event.agent,
                 generation=event.generation,
             )
         )
+
+    async def _run_from_event(
+        self,
+        agent_profile: AgentProfile,
+        generation: int,
+    ) -> None:
+        """包装事件驱动运行，避免后台任务异常未处理。"""
+
+        try:
+            await self.run(
+                agent_profile=agent_profile,
+                generation=generation,
+            )
+        except Exception:
+            logger.exception(
+                "事件驱动 PES 运行失败 [pes=%s, generation=%s]",
+                self.config.name,
+                generation,
+            )
 
     async def run(
         self,
@@ -382,8 +401,12 @@ class BasePES(ABC):
     ) -> None:
         """统一 phase 失败处理。"""
 
+        failure_reason = f"{phase} phase 失败: {error}"
         solution.status = "failed"
         solution.finished_at = utc_now_iso()
+        solution.metadata["failure_reason"] = failure_reason
+        if phase == "execute" or not solution.execute_summary:
+            solution.execute_summary = failure_reason
         self.hooks.dispatch_non_blocking(
             "on_phase_failed",
             FailureHookContext(
@@ -394,8 +417,62 @@ class BasePES(ABC):
             ),
         )
         self._persist_solution_status(solution)
+        self._emit_task_complete_event(solution=solution, status="failed")
         logger.exception(
             "PES phase 失败 [phase=%s, solution_id=%s]", phase, solution.id
+        )
+
+    def _emit_task_complete_event(
+        self,
+        solution: PESSolution,
+        status: str,
+        output_context: dict[str, Any] | None = None,
+    ) -> None:
+        """统一发射任务完成事件。"""
+
+        if self.received_execute_event is None:
+            return
+
+        EventBus.get().emit(
+            TaskCompleteEvent(
+                task_name=self.config.name,
+                pes_instance_id=self.instance_id,
+                status=status,
+                solution_id=solution.id,
+                output_context=output_context or {},
+            )
+        )
+
+    def _persist_solution_artifacts(self, solution: PESSolution) -> None:
+        """持久化 solution 工件路径。"""
+
+        if self.db is None or not hasattr(self.db, "update_solution_artifacts"):
+            return
+
+        self.db.update_solution_artifacts(
+            solution_id=solution.id,
+            workspace_dir=solution.workspace_dir,
+            solution_file_path=solution.solution_file_path,
+            submission_file_path=solution.submission_file_path,
+        )
+
+    def _log_contract_check(
+        self,
+        solution_id: str,
+        check_type: str,
+        passed: bool,
+        detail: str | None = None,
+    ) -> None:
+        """记录契约检查结果。"""
+
+        if self.db is None or not hasattr(self.db, "log_contract_check"):
+            return
+
+        self.db.log_contract_check(
+            solution_id=solution_id,
+            check_type=check_type,
+            passed=passed,
+            detail=detail,
         )
 
     def _persist_solution_created(self, solution: PESSolution) -> None:

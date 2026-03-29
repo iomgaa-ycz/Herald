@@ -180,6 +180,59 @@ class Workspace:
         """获取当前工作 solution.py 路径。"""
         return self.working_dir / "solution.py"
 
+    def get_working_file_path(self, file_name: str) -> Path:
+        """获取 working/ 目录下指定文件路径。
+
+        Args:
+            file_name: 工件文件名
+
+        Returns:
+            工件路径
+        """
+
+        return self.working_dir / file_name
+
+    def read_working_text(self, file_name: str) -> str | None:
+        """读取 working/ 下文本工件。
+
+        Args:
+            file_name: 工件文件名
+
+        Returns:
+            文件内容；不存在时返回 None
+        """
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            return None
+        return file_path.read_text(encoding="utf-8")
+
+    def read_working_solution(self, file_name: str = "solution.py") -> str:
+        """读取工作区中的 solution.py。
+
+        Args:
+            file_name: 代码文件名
+
+        Returns:
+            代码文本
+
+        Raises:
+            ValueError: 文件不存在、不可读或为空
+        """
+
+        file_path = self.get_working_file_path(file_name)
+        if not file_path.exists():
+            raise ValueError(f"工作区未找到代码文件: {file_path}")
+
+        try:
+            code = file_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise ValueError(f"读取代码文件失败: {file_path}") from error
+
+        if not code.strip():
+            raise ValueError(f"代码文件为空: {file_path}")
+        return code
+
     def get_log_path(self, name: str) -> Path:
         """获取日志文件路径。
 

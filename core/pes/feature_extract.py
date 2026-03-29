@@ -8,8 +8,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.events.bus import EventBus
-from core.events.types import TaskCompleteEvent
 from core.pes.base import BasePES
 from core.pes.schema import load_genome_template
 from core.pes.types import PESSolution
@@ -140,14 +138,10 @@ class FeatureExtractPES(BasePES):
         solution.status = "completed"
         solution.finished_at = utc_now_iso()
 
-        EventBus.get().emit(
-            TaskCompleteEvent(
-                task_name=self.config.name,
-                pes_instance_id=self.instance_id,
-                status="completed",
-                solution_id=solution.id,
-                output_context=self._build_output_context(solution),
-            )
+        self._emit_task_complete_event(
+            solution=solution,
+            status="completed",
+            output_context=self._build_output_context(solution),
         )
 
         return {"phase": "summarize", "response_text": response_text}
@@ -254,3 +248,4 @@ class FeatureExtractPES(BasePES):
         solution.solution_file_path = str(
             working_dir_path / self.config.solution_file_name
         )
+        self._persist_solution_artifacts(solution)
