@@ -131,7 +131,7 @@ def _build_config() -> PESConfig:
                 template_name=None,
                 tool_names=[],
                 max_retries=1,
-                allowed_tools=["Bash", "Read", "Glob", "Grep"],
+                allowed_tools=["Bash", "Read", "Glob", "Grep", "Skill"],
                 max_turns=12,
             ),
             "summarize": PhaseConfig(
@@ -229,9 +229,10 @@ def test_feature_extract_yaml_config_loads() -> None:
         "Read",
         "Glob",
         "Grep",
+        "Skill",
     ]
     assert config.get_phase("execute").max_turns == 12
-    assert config.get_phase("plan").max_turns == 1
+    assert config.get_phase("plan").max_turns == 3
 
 
 def test_handle_plan_phase() -> None:
@@ -410,7 +411,10 @@ def test_handle_summarize_emits_output_context(tmp_path: Path) -> None:
     assert output_context["task_spec"]["task_type"] == "tabular"
     assert output_context["data_profile"] == "训练集 100 行 10 列，无缺失值"
     assert output_context["schema"].task_type == "tabular"
-    assert "def build_model(config: dict[str, object])" in output_context["template_content"]
+    assert (
+        "def build_model(config: dict[str, object])"
+        in output_context["template_content"]
+    )
 
 
 def test_run_full_cycle(tmp_path: Path) -> None:

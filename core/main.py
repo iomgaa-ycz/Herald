@@ -54,6 +54,7 @@ def _build_llm_client(config: HeraldConfig) -> object:
             max_tokens=config.llm.max_tokens,
             max_turns=config.llm.max_turns,
             permission_mode=config.llm.permission_mode,
+            setting_sources=tuple(config.llm.setting_sources),
         )
     )
 
@@ -164,7 +165,13 @@ def main() -> None:
 
     workspace = Workspace(config.run.workspace_dir)
     workspace.create(config.run.competition_dir)
+    project_root = Path(__file__).resolve().parents[1]
+    visible_skills_dir = workspace.expose_project_skills(project_root)
     logger.info("工作空间已创建: %s", workspace.root)
+    if visible_skills_dir is not None:
+        logger.info("project skills 已暴露到 working 目录: %s", visible_skills_dir)
+    else:
+        logger.info("未发现 project skills 目录，跳过暴露")
 
     # Phase 3: 初始化数据库
     db = HeraldDB(str(workspace.db_path))

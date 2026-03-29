@@ -134,7 +134,9 @@ def test_bootstrap_feature_extract_pes_registers_instance(tmp_path: Path) -> Non
     assert instances == [feature_extract_pes]
     assert feature_extract_pes.workspace is workspace
     assert feature_extract_pes.db is db
-    assert feature_extract_pes.runtime_context["competition_dir"] == str(competition_dir)
+    assert feature_extract_pes.runtime_context["competition_dir"] == str(
+        competition_dir
+    )
 
 
 def test_run_metadata_file_can_be_written_and_updated(tmp_path: Path) -> None:
@@ -375,3 +377,106 @@ def test_main_injects_shared_run_id_into_runtime_context(
     assert metadata["run_id"] == "run-001"
     assert metadata["started_at"] == "2026-03-28T00:00:00+00:00"
     assert metadata["finished_at"] == "2026-03-28T00:10:00+00:00"
+
+
+def test_main_exposes_project_skills_when_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`main()` 会调用工作空间的 project skill 暴露逻辑。"""
+
+    import core.main as main_module
+
+    competition_dir = tmp_path / "competition"
+    competition_dir.mkdir(parents=True, exist_ok=True)
+    (competition_dir / "train.csv").write_text("id,label\n1,0\n", encoding="utf-8")
+
+    workspace_root = tmp_path / "workspace"
+    config = HeraldConfig(
+        llm=LLMConfig(
+            model="dummy-model",
+            max_tokens=2048,
+            max_turns=3,
+            permission_mode="bypassPermissions",
+        ),
+        run=RunConfig(
+            workspace_dir=str(workspace_root),
+            competition_dir=str(competition_dir),
+            max_tasks=1,
+        ),
+    )
+
+    captured: dict[str, Path] = {}
+
+    class _StubConfigManager:
+        def parse(self) -> HeraldConfig:
+            return config
+
+    def _stub_bootstrap_feature_extract_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        return _StubPES(
+            instance_id="feature_extract-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+
+    def _stub_bootstrap_draft_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        return _StubPES(
+            instance_id="draft-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+
+    def _stub_expose_project_skills(
+        self: Workspace,
+        project_root: str | Path,
+    ) -> Path:
+        captured["project_root"] = Path(project_root)
+        target_dir = tmp_path / "project-skills"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        skills_link = self.working_dir / ".claude" / "skills"
+        skills_link.parent.mkdir(parents=True, exist_ok=True)
+        if skills_link.exists() or skills_link.is_symlink():
+            skills_link.unlink()
+        skills_link.symlink_to(target_dir, target_is_directory=True)
+        return skills_link
+
+    timestamps = iter(
+        [
+            "2026-03-28T00:00:00+00:00",
+            "2026-03-28T00:10:00+00:00",
+        ]
+    )
+
+    monkeypatch.setattr(main_module, "ConfigManager", _StubConfigManager)
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_feature_extract_pes",
+        _stub_bootstrap_feature_extract_pes,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_draft_pes",
+        _stub_bootstrap_draft_pes,
+    )
+    monkeypatch.setattr(main_module, "Scheduler", _StubScheduler)
+    monkeypatch.setattr(main_module, "setup_task_dispatcher", lambda: None)
+    monkeypatch.setattr(main_module, "create_run_id", lambda: "run-001")
+    monkeypatch.setattr(main_module, "utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(
+        Workspace,
+        "expose_project_skills",
+        _stub_expose_project_skills,
+    )
+
+    main_module.main()
+
+    assert captured["project_root"] == Path(main_module.__file__).resolve().parents[1]
+    assert (workspace_root / "working" / ".claude" / "skills").is_symlink()

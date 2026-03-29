@@ -24,6 +24,12 @@ class LLMConfig:
     max_tokens: int = 32 * 1024
     max_turns: int = 16
     permission_mode: str = "bypassPermissions"
+    setting_sources: tuple[str, ...] = ("project",)
+
+    def __post_init__(self) -> None:
+        """归一化可迭代配置字段。"""
+
+        self.setting_sources = tuple(str(item) for item in self.setting_sources)
 
 
 @dataclass(slots=True)
@@ -69,7 +75,7 @@ class LLMClient:
             cwd=cwd,
             env=env or {},
             mcp_servers=mcp_servers or {},
-            setting_sources=[],
+            setting_sources=list(self.config.setting_sources),
         )
 
     async def execute_task(

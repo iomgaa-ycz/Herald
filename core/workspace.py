@@ -45,6 +45,8 @@ class Workspace:
         self.root = Path(root).expanduser().resolve()
         self.data_dir = self.root / "data"
         self.working_dir = self.root / "working"
+        self.working_claude_dir = self.working_dir / ".claude"
+        self.visible_project_skills_dir = self.working_claude_dir / "skills"
         self.history_dir = self.root / "history"
         self.logs_dir = self.root / "logs"
         self.best_dir = self.root / "best"
@@ -73,6 +75,35 @@ class Workspace:
 
         self._link_competition_data(competition_dir)
         return self
+
+    def expose_project_skills(self, project_root: str | Path) -> Path | None:
+        """将项目级 `.claude/skills/` 暴露到 working 目录。
+
+        Args:
+            project_root: 项目根目录
+
+        Returns:
+            `working/.claude/skills` 路径；若项目根不存在 skills 目录则返回 `None`
+        """
+
+        project_skills_dir = (
+            Path(project_root).expanduser().resolve() / ".claude" / "skills"
+        )
+        if not project_skills_dir.exists():
+            return None
+
+        self.working_claude_dir.mkdir(parents=True, exist_ok=True)
+        skills_link = self.visible_project_skills_dir
+        if skills_link.is_symlink() and skills_link.resolve() == project_skills_dir:
+            return skills_link
+
+        if skills_link.is_symlink() or skills_link.is_file():
+            skills_link.unlink()
+        elif skills_link.exists():
+            shutil.rmtree(skills_link)
+
+        skills_link.symlink_to(project_skills_dir, target_is_directory=True)
+        return skills_link
 
     def _link_competition_data(self, competition_dir: Path) -> None:
         """软链接竞赛数据到 data/ 目录。
@@ -294,6 +325,14 @@ class Workspace:
 
     def summary(self) -> dict[str, str]:
         """返回工作空间路径摘要（可注入 Prompt）。"""
+
+        project_skills_dir = ""
+        if (
+            self.visible_project_skills_dir.exists()
+            or self.visible_project_skills_dir.is_symlink()
+        ):
+            project_skills_dir = str(self.visible_project_skills_dir)
+
         return {
             "workspace_root": str(self.root),
             "data_dir": str(self.data_dir),
@@ -301,4 +340,5 @@ class Workspace:
             "history_dir": str(self.history_dir),
             "logs_dir": str(self.logs_dir),
             "db_path": str(self.db_path),
+            "project_skills_dir": project_skills_dir,
         }

@@ -31,6 +31,7 @@
 | `tests/unit/test_genome_template.py` | Task 2 | 已存在 | 模板加载与 slot 验证 |
 | `tests/unit/test_scheduler_stages.py` | Task 3 | 已存在 | task_stages 调度顺序 |
 | `tests/unit/test_main_bootstrap.py` | Task 4, 5 | 已存在 | bootstrap 装配与 run_id 注入 |
+| `tests/unit/test_llm_skill_config.py` | Task 13 | 已存在 | setting_sources 与 Skill 配置接线 |
 | `tests/unit/test_draft_pes.py` | Task 4, 6 | 已存在 | DraftPES 接口层 |
 | `tests/unit/test_prompt_manager.py` | Task 4 | 已存在 | Prompt 模板渲染 |
 | `tests/unit/test_tool_write_contract.py` | Task 6 | 已存在 | tool-write 契约校验 |
@@ -38,6 +39,7 @@
 | `tests/unit/test_metric_extraction.py` | Task 8 | 已存在 | val_metric 提取 |
 | `tests/unit/test_solution_model.py` | Task 8 | 已存在 | PESSolution 指标映射 |
 | `tests/unit/test_database_roundtrip.py` | Task 6, 7, 10 | 已存在 | DB 读写一致性 |
+| `tests/unit/test_workspace_skill_link.py` | Task 16 | 已存在 | project skills 软链接暴露 |
 | `tests/unit/test_agent_registry.py` | — | 已存在 | Agent profile 加载 |
 | `tests/unit/test_task_spec_schema.py` | Task 1 | **待新建** | TaskSpec / GenomeSchema 从真实竞赛构造 |
 | `tests/unit/test_exec_runner.py` | Task 7 | **待新建** | 执行事实采集的边界 case |
@@ -52,6 +54,7 @@
 | `tests/integration/test_dispatch_flow.py` | Task 3 | 已存在 | 事件流到达 PES |
 | `tests/integration/test_scheduler_flow.py` | Task 3 | 已存在 | Scheduler 调度闭环 |
 | `tests/integration/test_feature_extract_draft_pipeline.py` | Task 4 | 已存在 | 双 PES 流水线上下文传递 |
+| `tests/integration/test_feature_extract_skill_flow.py` | Task 13, 16 | 已存在 | Skill 工具接线与 working 可见性 |
 | `tests/integration/test_draft_pes_tool_write_flow.py` | Task 6 | 已存在 | 成功 / 失败回放经 Scheduler 闭环 |
 | `tests/integration/test_draft_pes_execute_fact_flow.py` | Task 7 | 已存在 | exec_logs 落库 |
 | `tests/integration/test_draft_pes_runtime_flow.py` | Task 8 | 已存在 | fitness 回写 DB |

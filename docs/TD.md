@@ -1203,7 +1203,7 @@ ConfigManager
 
 ### 6.3 Task 3：Scheduler 支持 task_stages + 数据传递
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 让 Scheduler 能按序调度多个 PES stage，并在 stage 间传递产出数据。
 
 **任务是什么**
@@ -1235,7 +1235,7 @@ ConfigManager
 
 ### 6.4 Task 4：Bootstrap 整合 + DraftPES 消费 data_profile
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 让 main.py 装配两个 PES，DraftPES 能消费 FeatureExtractPES 的产出。
 
 **任务是什么**

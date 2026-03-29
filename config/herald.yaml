@@ -8,6 +8,7 @@ llm:
   model: glm-5
   max_tokens: 32768
   max_turns: 16
+  setting_sources: ["project"]
   api_key: null  # 从环境变量 ANTHROPIC_API_KEY 读取
 
 # PES 配置
