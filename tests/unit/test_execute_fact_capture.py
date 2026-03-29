@@ -89,9 +89,24 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
     if solution_path.exists():
         solution_code = solution_path.read_text(encoding="utf-8")
 
+    expected_path = case_dir / "expected.json"
+    stdout_path = case_dir / "stdout.log"
+    stderr_path = case_dir / "stderr.log"
+
     return {
         "turns": json.loads((case_dir / "turns.json").read_text(encoding="utf-8")),
         "solution_code": solution_code,
+        "expected": (
+            json.loads(expected_path.read_text(encoding="utf-8"))
+            if expected_path.exists()
+            else {}
+        ),
+        "stdout": (
+            stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else None
+        ),
+        "stderr": (
+            stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else None
+        ),
     }
 
 
@@ -135,18 +150,23 @@ def test_extract_execute_fact_from_real_tool_trace(tmp_path: Path) -> None:
 
     replay = _load_replay_case("draft_success_tabular_v1")
     pes, _, _ = _build_pes(tmp_path, None, replay["turns"])
+    expected = dict(replay["expected"])
 
     exec_fact = pes._extract_execute_fact(  # noqa: SLF001
         DummyResponse(result="执行完成", turns=replay["turns"])
     )
 
-    assert exec_fact == {
-        "command": "python solution.py",
-        "stdout": "training done\nsubmission written to submission.csv",
-        "stderr": "",
-        "exit_code": 0,
-        "duration_ms": 1234.0,
-    }
+    assert exec_fact["command"] == str(expected.get("exec_command", "python solution.py"))
+    assert exec_fact["exit_code"] == int(expected.get("exit_code", 0))
+    assert exec_fact["duration_ms"] == float(expected.get("duration_ms", 1234.0))
+    if replay["stdout"] is not None:
+        assert exec_fact["stdout"] == replay["stdout"]
+    else:
+        assert exec_fact["stdout"] == "training done\nsubmission written to submission.csv"
+    if replay["stderr"] is not None:
+        assert exec_fact["stderr"] == replay["stderr"]
+    else:
+        assert exec_fact["stderr"] == ""
 
 
 def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
@@ -156,6 +176,7 @@ def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
 
     replay = _load_replay_case("draft_runtime_error_v1")
     solution_code = str(replay["solution_code"])
+    expected = dict(replay["expected"])
 
     def writer(working_dir: Path) -> None:
         (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
@@ -170,7 +191,10 @@ def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
     exec_logs = db.get_exec_logs(solution.id)
     assert len(exec_logs) == 1
     assert exec_logs[0]["command"] == "python solution.py"
-    assert exec_logs[0]["exit_code"] == 1
-    assert "RuntimeError: boom" in exec_logs[0]["stderr"]
+    assert exec_logs[0]["exit_code"] == int(expected.get("exit_code", 1))
+    if replay["stderr"] is not None:
+        assert exec_logs[0]["stderr"] == replay["stderr"]
+    else:
+        assert "RuntimeError: boom" in exec_logs[0]["stderr"]
     assert solution.status == "failed"
     assert "首次运行失败" in solution.metadata["failure_reason"]
