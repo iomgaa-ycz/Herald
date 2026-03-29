@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
 import sys
 from dataclasses import asdict
@@ -21,6 +22,20 @@ from core.utils.utils import create_run_id, utc_now_iso
 from core.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+
+
+def _load_create_grading_hook() -> object:
+    """延迟加载评分 hook 工厂。"""
+
+    grading_path = Path(__file__).resolve().parents[1] / "tests" / "grading.py"
+    spec = importlib.util.spec_from_file_location("herald_tests_grading", grading_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载评分模块: {grading_path}")
+
+    grading_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = grading_module
+    spec.loader.exec_module(grading_module)
+    return grading_module.create_grading_hook
 
 
 def _build_llm_client(config: HeraldConfig) -> object:
@@ -81,6 +96,7 @@ def bootstrap_draft_pes(
         Path(__file__).resolve().parents[1] / "config" / "pes" / "draft.yaml"
     )
     pes_config = load_pes_config(pes_config_path)
+    competition_root_dir = str(Path(config.run.competition_dir).expanduser().resolve())
     draft_pes = DraftPES(
         config=pes_config,
         llm=_build_llm_client(config),
@@ -88,7 +104,20 @@ def bootstrap_draft_pes(
         workspace=workspace,
         runtime_context={
             "competition_dir": config.run.competition_dir,
+            "competition_root_dir": competition_root_dir,
+            "competition_id": Path(competition_root_dir).name,
+            "public_data_dir": str(workspace.data_dir),
+            "workspace_logs_dir": str(workspace.logs_dir),
         },
+    )
+    create_grading_hook = _load_create_grading_hook()
+    draft_pes.hooks.register(
+        create_grading_hook(
+            competition_root_dir=competition_root_dir,
+            public_data_dir=str(workspace.data_dir),
+            workspace_logs_dir=str(workspace.logs_dir),
+        ),
+        name=f"{draft_pes.instance_id}_grading_hook",
     )
     logger.info("DraftPES 装配完成: instance_id=%s", draft_pes.instance_id)
     return draft_pes

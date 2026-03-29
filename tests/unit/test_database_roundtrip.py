@@ -150,3 +150,47 @@ def test_get_best_fitness_filters_by_run_id_and_excludes_current_solution(
     assert (
         db.get_best_fitness(run_id="run-001", exclude_solution_id="solution-a") == 0.85
     )
+
+
+def test_grading_result_roundtrip_with_real_sqlite(tmp_path: Path) -> None:
+    """评分结果可通过独立 grading_results 表完整 roundtrip。"""
+
+    db = HeraldDB(str(tmp_path / "herald.db"))
+    solution = PESSolution(
+        id="solution-001",
+        operation="draft",
+        generation=0,
+        status="completed",
+        created_at=utc_now_iso(),
+        parent_ids=[],
+        lineage="solution",
+        run_id="run-001",
+        fitness=0.91,
+    )
+    db.insert_solution(solution.to_record())
+    db.insert_grading_result(
+        {
+            "solution_id": solution.id,
+            "competition_id": "demo-comp",
+            "test_score": 0.88,
+            "test_score_direction": "max",
+            "test_valid_submission": True,
+            "test_medal_level": "silver",
+            "test_above_median": True,
+            "gold_threshold": 0.95,
+            "silver_threshold": 0.9,
+            "bronze_threshold": 0.8,
+            "median_threshold": 0.5,
+            "graded_at": utc_now_iso(),
+        }
+    )
+
+    row = db.get_latest_grading_result(solution.id)
+
+    assert row is not None
+    assert row["solution_id"] == solution.id
+    assert row["competition_id"] == "demo-comp"
+    assert row["test_score"] == 0.88
+    assert row["test_score_direction"] == "max"
+    assert row["test_valid_submission"] is True
+    assert row["test_medal_level"] == "silver"

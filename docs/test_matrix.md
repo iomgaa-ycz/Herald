@@ -55,7 +55,7 @@
 | `tests/integration/test_draft_pes_tool_write_flow.py` | Task 6 | 已存在 | 成功 / 失败回放经 Scheduler 闭环 |
 | `tests/integration/test_draft_pes_execute_fact_flow.py` | Task 7 | 已存在 | exec_logs 落库 |
 | `tests/integration/test_draft_pes_runtime_flow.py` | Task 8 | 已存在 | fitness 回写 DB |
-| `tests/integration/test_draft_pes_grading_flow.py` | Task 11 | **待新建** | test_score 补采集成 |
+| `tests/integration/test_draft_pes_grading_flow.py` | Task 11 | 已存在 | test_score 补采集成 |
 | `tests/integration/test_draft_pes_real_cases.py` | Task 12 | **待新建** | 真实竞赛端到端 |
 | `tests/integration/test_deepeval_draft_outputs.py` | Task 12 | **待新建** | LLM 输出文本质量 |
 
@@ -215,13 +215,13 @@ HERALD_TEST_DATA_ROOT=~/.cache/mle-bench/data   # MLE-Bench 数据目录
 | L1-3 | `test_feature_extract_then_draft` | 双 PES 流水线闭环 | 同上 + `task_stages` | L1-1 的全部输出 + FeatureExtract 产出 `task_spec.json` 和 `data_profile.md` | 1-10 |
 | L1-4 | `test_version_saved_and_best_promoted` | 成功后版本归档 | L1-1 成功运行后 | `history/` 含版本目录；`best/` 被设置 | 10 |
 
-### 5.3 评分集成（`test_draft_pes_grading_flow.py`，待新建）
+### 5.3 评分集成（`test_draft_pes_grading_flow.py`）
 
 | 编号 | 用例 | 验证什么 | 输入 | 预期输出 | TD Task |
 |---|---|---|---|---|---|
-| L1-5 | `test_score_acquisition` | test_score 补采 | L1-1 产出的 `submission.csv` | `solution.metadata` 含 `test_score`, `test_medal_level`, 四个阈值, `graded_at` | 11 |
+| L1-5 | `test_score_acquisition` | test_score 补采 | L1-1 产出的 `submission.csv` | `workspace/logs/grading_result.json` 含 `test_score`, `test_medal_level`, 四个阈值, `graded_at` | 11 |
 | L1-6 | `test_score_does_not_override_fitness` | test_score 不覆盖 fitness | 同上 | `solution.fitness` == 原始 `val_metric_value`（未被改写） | 11 |
-| L1-7 | `test_val_and_test_score_distinguished` | 二者被明确区分并持久化 | 同上 | `val_metric_value` 在 `solutions` 表；`test_score` 在 `solution.metadata`；两者值不同 | 11 |
+| L1-7 | `test_val_and_test_score_distinguished` | 二者被明确区分并持久化 | 同上 | `val_metric_value` 在 `solutions` 表；`test_score` 在 `grading_results` / `workspace/logs/grading_result.json`；两者值不同 | 11 |
 
 ### 5.4 L1 副产物归档
 
@@ -398,6 +398,7 @@ required_public_files:
 | 有效 submission 拿到 `test_score` | L1-5 |
 | `fitness` 不被改写 | L1-6 |
 | `val_metric_value` 与 `test_score` 明确区分 | L1-7 |
+| `to_prompt_payload()` 不暴露 grading 字段 | `tests/unit/test_grading.py::test_prompt_payload_does_not_expose_test_score`、`tests/integration/test_draft_pes_grading_flow.py::test_grading_does_not_enter_prompt_payload` |
 
 ### Task 12: 真实用例与 deepeval
 

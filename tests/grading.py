@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from core.pes.hooks import hookimpl
 from core.utils.utils import utc_now_iso
 
 if TYPE_CHECKING:
@@ -25,6 +27,7 @@ class GradingConfig:
     public_data_dir: str | Path | None = None
     mlebench_data_dir: str | Path | None = None
     competition_dir: str | Path | None = None
+    workspace_logs_dir: str | Path | None = None
     accepted_statuses: tuple[str, ...] = ("completed", "success")
 
 
@@ -55,6 +58,16 @@ def resolve_competition_root(competition_dir: str | Path) -> Path:
     if path.name == "prepared":
         return path.parent
     if (path / "prepared").exists():
+        return path
+    if (
+        path.is_dir()
+        and (
+            (path / "sample_submission.csv").exists()
+            or (path / "train.csv").exists()
+            or (path / "test.csv").exists()
+            or (path / "description.md").exists()
+        )
+    ):
         return path
 
     raise ValueError(f"无法从路径推断 competition root: {path}")
@@ -203,6 +216,10 @@ def _resolve_context_value(context: object, name: str) -> object | None:
     if hasattr(context, name):
         return getattr(context, name)
 
+    runtime_context = getattr(context, "runtime_context", None)
+    if isinstance(runtime_context, dict) and name in runtime_context:
+        return runtime_context[name]
+
     solution = getattr(context, "solution", None)
     if solution is not None and hasattr(solution, name):
         return getattr(solution, name)
@@ -272,6 +289,26 @@ def _resolve_mlebench_data_dir(
     return infer_data_dir(competition_dir)
 
 
+def _resolve_workspace_logs_dir(
+    context: object,
+    config: GradingConfig,
+) -> Path | None:
+    """解析评分日志落盘目录。"""
+
+    if config.workspace_logs_dir is not None:
+        return Path(config.workspace_logs_dir).expanduser().resolve()
+
+    workspace = getattr(context, "workspace", None)
+    logs_dir = getattr(workspace, "logs_dir", None)
+    if logs_dir is not None:
+        return Path(logs_dir).expanduser().resolve()
+
+    value = _resolve_context_value(context, "workspace_logs_dir")
+    if value:
+        return Path(value).expanduser().resolve()
+    return None
+
+
 def _resolve_submission_file_path(context: object) -> Path | None:
     """从 hook context 中解析 submission.csv 路径。"""
 
@@ -305,33 +342,87 @@ def _resolve_solution_id(context: object) -> str:
     value = _resolve_context_value(context, "solution_id")
     if value:
         return str(value)
+    solution = getattr(context, "solution", None)
+    if solution is not None:
+        solution_id = getattr(solution, "id", None)
+        if solution_id:
+            return str(solution_id)
     return "unknown"
 
 
-def _attach_result_to_solution(context: object, result: GradingResult) -> None:
-    """将 test_score 相关字段挂到 solution.metadata。"""
+def grading_result_to_record(
+    solution_id: str,
+    result: GradingResult,
+) -> dict[str, Any]:
+    """将评分结果转换为统一记录结构。"""
 
-    solution = getattr(context, "solution", None)
-    if solution is None:
+    return {
+        "solution_id": solution_id,
+        "competition_id": result.competition_id,
+        "test_score": result.test_score,
+        "test_score_direction": result.test_score_direction,
+        "test_valid_submission": result.test_valid_submission,
+        "test_medal_level": result.test_medal_level,
+        "test_above_median": result.test_above_median,
+        "test_gold_threshold": result.gold_threshold,
+        "test_silver_threshold": result.silver_threshold,
+        "test_bronze_threshold": result.bronze_threshold,
+        "test_median_threshold": result.median_threshold,
+        "test_graded_at": result.graded_at,
+    }
+
+
+def _persist_grading_result(
+    logs_dir: Path,
+    record: dict[str, Any],
+) -> Path:
+    """将评分结果写入 workspace/logs/grading_result.json。"""
+
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    output_path = logs_dir / "grading_result.json"
+    records: list[dict[str, Any]] = []
+    if output_path.exists():
+        try:
+            loaded = json.loads(output_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            loaded = []
+        if isinstance(loaded, list):
+            records = loaded
+        elif isinstance(loaded, dict):
+            records = [loaded]
+
+    records.append(record)
+    output_path.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return output_path
+
+
+def _persist_grading_result_to_db(
+    context: object,
+    record: dict[str, Any],
+) -> None:
+    """将评分结果写入 DB 独立通道。"""
+
+    db = getattr(context, "db", None)
+    if db is None or not hasattr(db, "insert_grading_result"):
         return
 
-    metadata = getattr(solution, "metadata", None)
-    if not isinstance(metadata, dict):
-        return
-
-    metadata.update(
+    db.insert_grading_result(
         {
-            "test_score": result.test_score,
-            "test_score_direction": result.test_score_direction,
-            "test_valid_submission": result.test_valid_submission,
-            "test_medal_level": result.test_medal_level,
-            "test_above_median": result.test_above_median,
-            "test_competition_id": result.competition_id,
-            "test_gold_threshold": result.gold_threshold,
-            "test_silver_threshold": result.silver_threshold,
-            "test_bronze_threshold": result.bronze_threshold,
-            "test_median_threshold": result.median_threshold,
-            "test_graded_at": result.graded_at,
+            "solution_id": record["solution_id"],
+            "competition_id": record["competition_id"],
+            "test_score": record["test_score"],
+            "test_score_direction": record["test_score_direction"],
+            "test_valid_submission": record["test_valid_submission"],
+            "test_medal_level": record["test_medal_level"],
+            "test_above_median": record["test_above_median"],
+            "gold_threshold": record["test_gold_threshold"],
+            "silver_threshold": record["test_silver_threshold"],
+            "bronze_threshold": record["test_bronze_threshold"],
+            "median_threshold": record["test_median_threshold"],
+            "graded_at": record["test_graded_at"],
         }
     )
 
@@ -402,9 +493,19 @@ class MLEBenchGradingHook:
             logger.warning("test_score 评分失败: solution_id=%s", solution_id)
             return None
 
-        _attach_result_to_solution(context, result)
+        record = grading_result_to_record(solution_id=solution_id, result=result)
+        logs_dir = _resolve_workspace_logs_dir(context, self.config)
+        if logs_dir is not None:
+            _persist_grading_result(logs_dir=logs_dir, record=record)
+        _persist_grading_result_to_db(context=context, record=record)
         logger.info(format_grading_result(result))
         return result
+
+    @hookimpl
+    def after_run(self, context: object) -> None:
+        """在 after_run hook 中执行评分。"""
+
+        self(context)
 
 
 def create_grading_hook(
@@ -415,6 +516,7 @@ def create_grading_hook(
     competition_root_dir: str | Path | None = None,
     public_data_dir: str | Path | None = None,
     mlebench_data_dir: str | Path | None = None,
+    workspace_logs_dir: str | Path | None = None,
 ) -> MLEBenchGradingHook:
     """创建可复用的 MLE-Bench 评分 hook。"""
 
@@ -426,5 +528,6 @@ def create_grading_hook(
             public_data_dir=public_data_dir,
             mlebench_data_dir=mlebench_data_dir,
             competition_dir=competition_dir,
+            workspace_logs_dir=workspace_logs_dir,
         )
     )

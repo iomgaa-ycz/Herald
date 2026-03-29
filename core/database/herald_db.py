@@ -8,6 +8,7 @@ from core.database.connection import DatabaseConnection
 from core.database.queries import LineageQueries, PopulationQueries
 from core.database.repositories import (
     GeneRepository,
+    GradingRepository,
     L2Repository,
     SnapshotRepository,
     SolutionRepository,
@@ -29,6 +30,7 @@ class HeraldDB:
 
         self.solutions = SolutionRepository(conn)
         self.genes = GeneRepository(conn)
+        self.grading = GradingRepository(conn)
         self.snapshots = SnapshotRepository(conn)
         self.tracing = TracingRepository(conn)
         self.l2 = L2Repository(conn)
@@ -181,6 +183,22 @@ class HeraldDB:
             run_id=run_id,
             exclude_solution_id=exclude_solution_id,
         )
+
+    def insert_grading_result(self, result: dict[str, Any]) -> str:
+        """写入评分结果。"""
+
+        with self.transaction():
+            return self.grading.insert(result)
+
+    def get_grading_results(self, solution_id: str) -> list[dict]:
+        """读取 solution 对应的全部评分结果。"""
+
+        return self.grading.get_by_solution(solution_id)
+
+    def get_latest_grading_result(self, solution_id: str) -> dict | None:
+        """读取 solution 最新评分结果。"""
+
+        return self.grading.get_latest_by_solution(solution_id)
 
     def get_lineage_chain(self, solution_id: str) -> list[dict]:
         return self.lineage.get_lineage_chain(solution_id)

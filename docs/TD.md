@@ -950,7 +950,8 @@ class HeraldDB:
   - `exec_logs`
   - `code_snapshots`
 - `metric_value` 在当前阶段表示 `val_metric_value`
-- `test_score` 当前先挂在 `solution.metadata`，后续再决定是否单独建表
+- `test_score` 当前写入 `workspace/logs/grading_result.json`，并可同步写入 DB 独立表
+- `test_score` 不得通过 `solution.metadata` / `to_prompt_payload()` 暴露给 agent
 
 ### 验证 Checkpoint
 
@@ -961,7 +962,7 @@ class HeraldDB:
 
 ## 4.12 test_score 评分层
 
-**状态**: ✅ 评分模块已写，⬜ 尚未接入运行时 hook
+**状态**: ✅ 已接入运行时 hook
 **层级**: 外部评测层
 **前置依赖**: `mlebench`
 **测试文件**: 后续新增 `tests/unit/test_grading.py`
@@ -973,7 +974,9 @@ class HeraldDB:
 - 在缺显式字段时，从竞赛路径 fallback 推断 `competition_id` 与 `data_dir`
 - 调用 MLE-Bench 评分接口
 - 归一化 `CompetitionReport`
-- 将 `test_score` 挂回 `solution.metadata`
+- 将 `test_score` 写入 `workspace/logs/grading_result.json`
+- 可同步写入 DB 独立评分记录
+- 不得通过 `to_prompt_payload()` 暴露给 agent
 
 ### 关键接口签名
 
@@ -986,6 +989,7 @@ class GradingConfig:
     public_data_dir: str | Path | None = None
     mlebench_data_dir: str | Path | None = None
     competition_dir: str | Path | None = None
+    workspace_logs_dir: str | Path | None = None
     accepted_statuses: tuple[str, ...] = ("completed", "success")
 
 @dataclass(frozen=True, slots=True)
@@ -1485,13 +1489,15 @@ ConfigManager
 
 ### 6.11 Task 11：接入 `MLEBenchGradingHook` 获取 `test_score`
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 为每个有效 submission 补采外部真实性分数。
 
 **任务是什么**
 
 - 在 `after_run` 挂接 `MLEBenchGradingHook`
-- 将 `test_score` 及相关元数据写回 `solution.metadata`
+- 将 `test_score` 及相关元数据写入 `workspace/logs/grading_result.json`
+- 可同步写入 DB 独立评分记录
+- 不通过 `solution.metadata` / `to_prompt_payload()` 暴露给 agent
 
 **要干什么**
 
@@ -1522,8 +1528,9 @@ ConfigManager
 **测试通过标准**
 
 - 有效 submission 能拿到 `test_score`
-- `solution.metadata` 中存在 `test_score`、`test_score_direction`、`test_valid_submission`、`test_medal_level`
-- `solution.metadata` 中存在 `test_competition_id`、四个阈值字段与 `test_graded_at`
+- `workspace/logs/grading_result.json` 中存在 `test_score`、`test_score_direction`、`test_valid_submission`、`test_medal_level`
+- 同时存在 `test_competition_id`、四个阈值字段与 `test_graded_at`
+- `to_prompt_payload()` 不暴露任何 `test_*` grading 字段
 - `fitness` 与 `val_metric_value` 不会被评分 hook 改写
 
 ### 6.12 Task 12：补齐真实竞赛 case、真实回放 case 与 deepeval 评审

@@ -5,6 +5,20 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
+_HUMAN_ONLY_METADATA_KEYS = {
+    "test_score",
+    "test_score_direction",
+    "test_valid_submission",
+    "test_medal_level",
+    "test_above_median",
+    "test_competition_id",
+    "test_gold_threshold",
+    "test_silver_threshold",
+    "test_bronze_threshold",
+    "test_median_threshold",
+    "test_graded_at",
+}
+
 
 def _get_metric_field(
     metrics: dict[str, Any] | None,
@@ -126,4 +140,11 @@ class PESSolution:
 
         payload = _to_plain_data(self)
         payload["metrics"] = _build_metric_aliases(self.metrics)
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            payload["metadata"] = {
+                key: value
+                for key, value in metadata.items()
+                if key not in _HUMAN_ONLY_METADATA_KEYS
+            }
         return payload

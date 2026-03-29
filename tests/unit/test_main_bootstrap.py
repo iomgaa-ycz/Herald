@@ -88,6 +88,11 @@ def test_bootstrap_draft_pes_registers_instance(tmp_path: Path) -> None:
     assert draft_pes.workspace is workspace
     assert draft_pes.db is db
     assert draft_pes.runtime_context["competition_dir"] == str(competition_dir)
+    assert draft_pes.runtime_context["competition_root_dir"] == str(
+        competition_dir.resolve()
+    )
+    assert draft_pes.runtime_context["public_data_dir"] == str(workspace.data_dir)
+    assert draft_pes.runtime_context["workspace_logs_dir"] == str(workspace.logs_dir)
 
 
 def test_bootstrap_feature_extract_pes_registers_instance(tmp_path: Path) -> None:

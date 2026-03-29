@@ -25,6 +25,9 @@ class RunHookContext:
     phase: str | None
     solution: PESSolution
     parent_solution: PESSolution | None
+    workspace: object | None = None
+    db: object | None = None
+    runtime_context: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

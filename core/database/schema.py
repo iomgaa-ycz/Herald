@@ -96,6 +96,26 @@ CREATE TABLE IF NOT EXISTS contract_checks (
 )
 """
 
+DDL_GRADING_RESULTS = """
+CREATE TABLE IF NOT EXISTS grading_results (
+    id TEXT PRIMARY KEY,
+    solution_id TEXT NOT NULL,
+    competition_id TEXT NOT NULL,
+    test_score REAL NOT NULL,
+    test_score_direction TEXT NOT NULL,
+    test_valid_submission INTEGER NOT NULL,
+    test_medal_level TEXT NOT NULL,
+    test_above_median INTEGER NOT NULL,
+    gold_threshold REAL,
+    silver_threshold REAL,
+    bronze_threshold REAL,
+    median_threshold REAL,
+    graded_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(solution_id) REFERENCES solutions(id) ON DELETE CASCADE
+)
+"""
+
 DDL_L2_INSIGHTS = """
 CREATE TABLE IF NOT EXISTS l2_insights (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +177,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_llm_calls_solution_id ON llm_calls(solution_id)",
     "CREATE INDEX IF NOT EXISTS idx_exec_logs_solution_id ON exec_logs(solution_id)",
     "CREATE INDEX IF NOT EXISTS idx_contract_checks_solution_id ON contract_checks(solution_id)",
+    "CREATE INDEX IF NOT EXISTS idx_grading_results_solution_id ON grading_results(solution_id)",
     "CREATE INDEX IF NOT EXISTS idx_l2_insights_lookup ON l2_insights(slot, task_type, pattern)",
     "CREATE INDEX IF NOT EXISTS idx_l2_evidence_insight_id ON l2_evidence(insight_id)",
 ]
@@ -186,6 +207,7 @@ ALL_DDL = [
     DDL_LLM_CALLS,
     DDL_EXEC_LOGS,
     DDL_CONTRACT_CHECKS,
+    DDL_GRADING_RESULTS,
     DDL_L2_INSIGHTS,
     DDL_L2_EVIDENCE,
     DDL_L3_WISDOM,

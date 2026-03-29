@@ -158,6 +158,9 @@ class BasePES(ABC):
                 phase=None,
                 solution=solution,
                 parent_solution=parent_solution,
+                workspace=self.workspace,
+                db=self.db,
+                runtime_context=dict(self.runtime_context),
             ),
         )
 
@@ -181,6 +184,9 @@ class BasePES(ABC):
                     phase=None,
                     solution=solution,
                     parent_solution=parent_solution,
+                    workspace=self.workspace,
+                    db=self.db,
+                    runtime_context=dict(self.runtime_context),
                 ),
             )
 
