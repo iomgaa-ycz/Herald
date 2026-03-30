@@ -13,7 +13,8 @@ import asyncio
 import logging
 import time
 from collections import deque
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core.events.types import Event
 
