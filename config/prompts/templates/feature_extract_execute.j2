@@ -73,13 +73,27 @@
     "metric_name": "评估指标名（如 auc, rmse, accuracy）",
     "metric_direction": "maximize 或 minimize"
   },
-  "data_profile": "数据概况报告：包含数据集大小、特征数量、特征类型分布、缺失值情况、目标变量分布等关键信息",
+  "data_profile": "完整的 Markdown 格式数据概况报告（见下方固定结构要求）",
   "genome_template": "tabular 或 generic"
 }
 ```
 
+## `data_profile` 固定结构要求
+
+`data_profile` 的值必须是一段完整的 Markdown 文本，严格遵循以下 6 个 section 的标题和顺序：
+
+1. `# 数据概况报告` — 顶级标题
+2. `## 1. 数据集概览` — 竞赛名称、任务类型、训练集/测试集规模
+3. `## 2. 特征分析` — 数值特征、类别特征、高基数特征
+4. `## 3. 缺失值` — 缺失列及比例，无则写"无缺失值"
+5. `## 4. 目标变量` — 列名、类型、分布
+6. `## 5. 提交格式` — 列顺序、ID 列、目标列、行数约束
+7. `## 6. 关键发现与建模建议` — 特殊提示与建模影响
+
+若某个 section 信息不足，使用"信息不足"标注，但**不能省略该 section 标题**。
+
 **注意**：
 - JSON 必须是合法的、可解析的
 - `task_spec` 中所有字段都必须填写
-- `data_profile` 应包含足够的信息供后续建模参考
+- `data_profile` 必须遵循上述固定 Markdown 标题结构，不要输出"一段话总结"
 - `genome_template` 必须是 `tabular` 或 `generic`

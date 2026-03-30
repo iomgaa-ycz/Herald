@@ -235,6 +235,18 @@ def test_feature_extract_yaml_config_loads() -> None:
     assert config.get_phase("plan").max_turns == 3
 
 
+# data_profile.md 固定标题结构中的 6 个必需 section 标题
+DATA_PROFILE_REQUIRED_SECTIONS = (
+    "# 数据概况报告",
+    "## 1. 数据集概览",
+    "## 2. 特征分析",
+    "## 3. 缺失值",
+    "## 4. 目标变量",
+    "## 5. 提交格式",
+    "## 6. 关键发现与建模建议",
+)
+
+
 def test_feature_extract_skill_contract_keeps_execute_phase_skill_enabled() -> None:
     """Task 14 落地后，execute phase 保留 Skill，源码目录完整。"""
 
@@ -795,3 +807,55 @@ def test_competition_manifest_valid() -> None:
                 assert (data_dir / filename).exists(), (
                     f"{manifest_path.name}: 文件不存在 {data_dir / filename}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Task 15: report-format skill 与 data_profile 固定结构
+# ---------------------------------------------------------------------------
+
+
+def test_report_format_skill_exists_and_complete() -> None:
+    """report-format skill 目录存在且 SKILL.md 包含 6 个 section 标题。"""
+
+    project_root = Path(__file__).resolve().parents[2]
+    skill_dir = (
+        project_root
+        / "core"
+        / "prompts"
+        / "skills"
+        / "feature-extract-report-format"
+    )
+
+    assert skill_dir.is_dir()
+    skill_md = skill_dir / "SKILL.md"
+    assert skill_md.exists()
+
+    skill_text = skill_md.read_text(encoding="utf-8")
+    for section_title in DATA_PROFILE_REQUIRED_SECTIONS:
+        assert section_title in skill_text, (
+            f"SKILL.md 缺少 section 标题: {section_title}"
+        )
+
+
+def test_data_profile_has_required_sections() -> None:
+    """回放资产中的 data_profile 包含 6 个固定标题 section。"""
+
+    replay = _load_replay("feature_extract_tabular_success_v1")
+    data_profile = replay["expected"]["data_profile"]
+
+    for section_title in DATA_PROFILE_REQUIRED_SECTIONS:
+        assert section_title in data_profile, (
+            f"data_profile 缺少 section: {section_title}"
+        )
+
+
+def test_degraded_data_profile_has_required_sections() -> None:
+    """降级 case 的 data_profile 也包含 6 个固定标题 section。"""
+
+    replay = _load_replay("feature_extract_degraded_v1")
+    data_profile = replay["expected"]["data_profile"]
+
+    for section_title in DATA_PROFILE_REQUIRED_SECTIONS:
+        assert section_title in data_profile, (
+            f"降级 data_profile 缺少 section: {section_title}"
+        )

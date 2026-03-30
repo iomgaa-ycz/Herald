@@ -1702,7 +1702,7 @@ ConfigManager
 
 ### 6.15 Task 15：实现 FeatureExtract 的 `data_profile.md` 格式化 skill
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 让 `data_profile.md` 变成固定结构、可读、可被 DraftPES 稳定消费的正式工件。
 
 **任务是什么**

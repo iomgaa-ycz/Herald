@@ -259,6 +259,35 @@ def test_feature_extract_execute_sees_visible_project_skills(tmp_path: Path) -> 
     assert workspace.summary()["project_skills_dir"] == str(visible_skills_dir)
 
 
+def test_report_format_skill_visible_in_working(tmp_path: Path) -> None:
+    """report-format skill 可通过 expose_project_skills() 暴露到 working。"""
+
+    competition_dir = _require_real_competition_dir("tabular-playground-series-may-2022")
+    skills_source = _skills_source()
+
+    workspace = Workspace(tmp_path / "workspace")
+    workspace.create(competition_dir)
+    visible_skills_dir = workspace.expose_project_skills(skills_source)
+
+    assert visible_skills_dir is not None
+
+    report_format_skill = (
+        workspace.working_dir
+        / ".claude"
+        / "skills"
+        / "feature-extract-report-format"
+        / "SKILL.md"
+    )
+    assert report_format_skill.exists(), (
+        "report-format SKILL.md 应通过 expose_project_skills 可见"
+    )
+
+    skill_text = report_format_skill.read_text(encoding="utf-8")
+    assert "# 数据概况报告" in skill_text
+    assert "## 1. 数据集概览" in skill_text
+    assert "## 6. 关键发现与建模建议" in skill_text
+
+
 def test_feature_extract_execute_skips_missing_project_skills(tmp_path: Path) -> None:
     """缺少 project skills 时 execute 链路仍可继续。"""
 
