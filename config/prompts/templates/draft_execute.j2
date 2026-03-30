@@ -51,6 +51,7 @@
 - `working_dir`: `{{ workspace.working_dir }}`
 - `logs_dir`: `{{ workspace.logs_dir }}`
 - `db_path`: `{{ workspace.db_path }}`
+- `run_log_path`: `{{ workspace.run_log_path }}`
 {% else %}
 # 工作空间
 
@@ -127,6 +128,8 @@
 - 必须在验证集上计算并打印评估指标
 - 必须将测试集预测结果保存为 submission.csv
 - 代码应在规定时间内运行完成
+- 运行 solution.py 时，必须使用以下命令将输出同时保存到日志文件，方便人类实时观察训练进度:
+  `set -o pipefail; python solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}`
 
 # 输出格式
 

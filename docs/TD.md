@@ -1735,7 +1735,7 @@ ConfigManager
 
 ### 6.16 Task 16：运行时暴露 project skills 到 `workspace/working/.claude/skills/`
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现（plan 029 联动完成）
 **目标**: 保证 phase `cwd` 已切到 `workspace/working` 时，Claude Agent SDK 仍能发现项目 skill。
 
 **任务是什么**
@@ -1768,7 +1768,7 @@ ConfigManager
 
 ### 6.17 Task 17：增加 run 级人类可读日志文件
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 在不改变现有结构化记录真相来源的前提下，为长时间运行提供可持续观察的日志窗口。
 
 **任务是什么**

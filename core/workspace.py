@@ -53,6 +53,7 @@ class Workspace:
         self.database_dir = self.root / "database"
         self.db_path = self.database_dir / "herald.db"
         self.metadata_path = self.root / "metadata.json"
+        self.run_log_path = self.working_dir / "run.log"
 
     def create(self, competition_dir: str | Path) -> Workspace:
         """创建工作空间目录结构并链接数据。
@@ -338,5 +339,6 @@ class Workspace:
             "history_dir": str(self.history_dir),
             "logs_dir": str(self.logs_dir),
             "db_path": str(self.db_path),
+            "run_log_path": str(self.run_log_path),
             "project_skills_dir": project_skills_dir,
         }
