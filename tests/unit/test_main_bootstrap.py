@@ -436,9 +436,9 @@ def test_main_exposes_project_skills_when_present(
 
     def _stub_expose_project_skills(
         self: Workspace,
-        project_root: str | Path,
+        skills_source_dir: str | Path,
     ) -> Path:
-        captured["project_root"] = Path(project_root)
+        captured["skills_source_dir"] = Path(skills_source_dir)
         target_dir = tmp_path / "project-skills"
         target_dir.mkdir(parents=True, exist_ok=True)
         skills_link = self.working_dir / ".claude" / "skills"
@@ -478,5 +478,7 @@ def test_main_exposes_project_skills_when_present(
 
     main_module.main()
 
-    assert captured["project_root"] == Path(main_module.__file__).resolve().parents[1]
+    assert captured["skills_source_dir"] == (
+        Path(main_module.__file__).resolve().parents[1] / "core" / "prompts" / "skills"
+    )
     assert (workspace_root / "working" / ".claude" / "skills").is_symlink()

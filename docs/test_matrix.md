@@ -54,7 +54,7 @@
 | `tests/integration/test_dispatch_flow.py` | Task 3 | 已存在 | 事件流到达 PES |
 | `tests/integration/test_scheduler_flow.py` | Task 3 | 已存在 | Scheduler 调度闭环 |
 | `tests/integration/test_feature_extract_draft_pipeline.py` | Task 4 | 已存在 | 双 PES 流水线上下文传递 |
-| `tests/integration/test_feature_extract_skill_flow.py` | Task 13, 16 | 已存在 | Skill 工具接线与 working 可见性 |
+| `tests/integration/test_feature_extract_skill_flow.py` | Task 13, 14, 16 | 已存在 | Skill 工具接线、working 可见性与真实竞赛数据上的预览脚本执行 |
 | `tests/integration/test_draft_pes_tool_write_flow.py` | Task 6 | 已存在 | 成功 / 失败回放经 Scheduler 闭环 |
 | `tests/integration/test_draft_pes_execute_fact_flow.py` | Task 7 | 已存在 | exec_logs 落库 |
 | `tests/integration/test_draft_pes_runtime_flow.py` | Task 8 | 已存在 | fitness 回写 DB |

@@ -235,6 +235,41 @@ def test_feature_extract_yaml_config_loads() -> None:
     assert config.get_phase("plan").max_turns == 3
 
 
+def test_feature_extract_skill_contract_keeps_execute_phase_skill_enabled() -> None:
+    """Task 14 落地后，execute phase 保留 Skill，源码目录完整。"""
+
+    config = load_pes_config("config/pes/feature_extract.yaml")
+    project_root = Path(__file__).resolve().parents[2]
+    skill_source_dir = (
+        project_root
+        / "core"
+        / "prompts"
+        / "skills"
+        / "feature-extract-data-preview"
+    )
+
+    assert config.get_phase("execute").allowed_tools is not None
+    assert "Skill" in config.get_phase("execute").allowed_tools
+    assert (skill_source_dir / "SKILL.md").exists()
+    assert (
+        skill_source_dir / "scripts" / "preview_support.py"
+    ).exists()
+    assert (
+        skill_source_dir / "scripts" / "preview_competition.py"
+    ).exists()
+    assert (
+        skill_source_dir / "scripts" / "preview_description.py"
+    ).exists()
+    assert (skill_source_dir / "scripts" / "preview_table.py").exists()
+    assert (
+        skill_source_dir / "scripts" / "preview_submission.py"
+    ).exists()
+
+    skill_text = (skill_source_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "preview_competition.py" in skill_text
+    assert "preview_submission.py" in skill_text
+
+
 def test_handle_plan_phase() -> None:
     """plan 阶段正确更新 plan_summary。"""
     pes = FeatureExtractPES(

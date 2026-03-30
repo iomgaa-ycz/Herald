@@ -886,7 +886,7 @@ class LLMClient:
 class Workspace:
     def __init__(self, root: str | Path) -> None
     def create(self, competition_dir: str | Path) -> Workspace
-    def expose_project_skills(self, project_root: str | Path) -> Path | None
+    def expose_project_skills(self, skills_source_dir: str | Path) -> Path | None
     def save_version(
         self,
         code: str,
@@ -910,7 +910,7 @@ class Workspace:
 - `create()` 必须优先链接 `prepared/public`
 - `working/` 用于当前 solution 输出
 - 工作空间根目录必须承载 run 级 `metadata.json`
-- 若项目根存在 `.claude/skills/`，则 `working/.claude/skills` 必须通过软链接暴露该目录
+- 若 `core/prompts/skills/` 存在，则 `working/.claude/skills` 必须通过软链接暴露该目录
 - `workspace/logs/run.log` 作为 run 级人类可读日志文件存在，不作为结构化真相来源
 - 阶段目标版本必须把真实 `solution.py` / `submission.csv` 落到 `working/`
 - 成功 run 后应调用 `save_version()`
@@ -1273,7 +1273,7 @@ ConfigManager
 
 ### 6.5 Task 5：注入 `run_id` 与 run 级元数据
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 让每次运行有唯一标识，并在工作空间留下可审阅的 run 级元数据。
 
 **任务是什么**
@@ -1305,7 +1305,7 @@ ConfigManager
 
 ### 6.6 Task 6：建立 Tool-Write 契约并落盘真实 `solution.py`
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 把 execute 阶段从“工具能力可选”推进到“`tool-write` 成功写出代码才算 execute 成功”。
 
 **任务是什么**
@@ -1354,7 +1354,7 @@ ConfigManager
 
 ### 6.7 Task 7：执行 `solution.py` 并记录 `exec_logs`
 
-**状态**: ⬜ 待实现
+**状态**: ✅ 已实现
 **目标**: 让系统拿到并持久化生成代码的首次真实执行事实，而不是停在代码落盘，也不是依赖模型自然语言自评。
 
 **任务是什么**
@@ -1679,14 +1679,15 @@ ConfigManager
 
 **要干什么**
 
-- 在 `.claude/skills/feature-extract-data-preview/` 下创建 `SKILL.md`
+- 在 `core/prompts/skills/feature-extract-data-preview/` 下维护 `SKILL.md`
+- 运行时通过 `expose_project_skills()` 将 `core/prompts/skills` 暴露到 `working/.claude/skills`
 - 新建 `scripts/` 下的数据预览函数脚本
 - 约定最小输出：文件清单、样本规模、列统计、缺失值、目标列与 submission 约束
 
 **涉及文件**
 
-- `.claude/skills/feature-extract-data-preview/SKILL.md` [NEW]
-- `.claude/skills/feature-extract-data-preview/scripts/*` [NEW]
+- `core/prompts/skills/feature-extract-data-preview/SKILL.md` [NEW]
+- `core/prompts/skills/feature-extract-data-preview/scripts/*` [NEW]
 
 **必过测试**
 
@@ -1712,13 +1713,13 @@ ConfigManager
 
 **要干什么**
 
-- 在 `.claude/skills/feature-extract-report-format/` 下创建 `SKILL.md`
+- 在 `core/prompts/skills/feature-extract-report-format/` 下创建 `SKILL.md`
 - 提供 Markdown 模板或格式化说明
 - 更新 `feature_extract_execute` prompt，要求最终 `data_profile` 遵守固定结构
 
 **涉及文件**
 
-- `.claude/skills/feature-extract-report-format/SKILL.md` [NEW]
+- `core/prompts/skills/feature-extract-report-format/SKILL.md` [NEW]
 - `config/prompts/templates/feature_extract_execute.j2` [MODIFY]
 
 **必过测试**
@@ -1740,8 +1741,8 @@ ConfigManager
 **任务是什么**
 
 - 在工作空间创建 `.claude/skills` 软链接
-- 链接目标指向项目根目录下的 `.claude/skills/`
-- 缺少 project skill 目录时安全跳过
+- 链接目标直接指向 `core/prompts/skills/`
+- 缺少 skills 源目录时安全跳过
 
 **要干什么**
 
@@ -1761,9 +1762,9 @@ ConfigManager
 
 **测试通过标准**
 
-- `workspace/working/.claude/skills` 是指向项目 skill 目录的软链接
+- `workspace/working/.claude/skills` 是指向 `core/prompts/skills/` 的软链接
 - execute phase 在 `cwd=workspace/working` 时可发现 skill
-- 不存在 `.claude/skills/` 时不会阻塞主链路
+- 不存在 skills 源目录时不会阻塞主链路
 
 ### 6.17 Task 17：增加 run 级人类可读日志文件
 
@@ -1851,7 +1852,7 @@ ConfigManager
 - `metadata.json` 中有 `started_at` 与 `finished_at`
 - FeatureExtractPES 成功产出 `working/task_spec.json` 和 `working/data_profile.md`
 - DraftPES 成功消费了 TaskSpec 和 data_profile
-- 若项目存在 `.claude/skills/`，则 `workspace/working/.claude/skills` 可见
+- 若 `core/prompts/skills/` 存在，则 `workspace/working/.claude/skills` 可见
 - 有真实 `working/solution.py`
 - 有真实 `working/submission.csv`
 - `solutions` 中有 FeatureExtract 和 Draft 两类 solution 记录
@@ -1880,12 +1881,7 @@ ConfigManager
 ```text
 Herald2/
 ├── .claude/
-│   └── skills/
-│       ├── feature-extract-data-preview/
-│       │   ├── SKILL.md
-│       │   └── scripts/
-│       └── feature-extract-report-format/
-│           └── SKILL.md
+│   └── skills -> ../core/prompts/skills
 ├── core/
 │   ├── main.py
 │   ├── llm.py
@@ -1901,6 +1897,12 @@ Herald2/
 │   │   ├── types.py
 │   │   └── ...
 │   ├── prompts/
+│   │   └── skills/
+│   │       ├── feature-extract-data-preview/
+│   │       │   ├── SKILL.md
+│   │       │   └── scripts/
+│   │       └── feature-extract-report-format/
+│   │           └── SKILL.md
 │   └── database/
 ├── config/
 │   ├── herald.yaml
@@ -1933,7 +1935,7 @@ Herald2/
     │   └── run.log
     └── working/
         └── .claude/
-            └── skills -> ../../../.claude/skills
+            └── skills -> {project_root}/core/prompts/skills
 └── plans/
 ```
 

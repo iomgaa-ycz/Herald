@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
+import os
+import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
+import yaml
 
 from core.agent.profile import AgentProfile
 from core.events.bus import EventBus
@@ -70,40 +78,110 @@ class DummyPromptManager:
         return f"prompt:{phase}"
 
 
-def _build_competition_dir(project_root: Path) -> Path:
-    """构造最小竞赛目录。"""
+MANIFEST_DIR = Path(__file__).resolve().parents[1] / "cases" / "competitions"
+_TEST_DATA_ROOT = Path(
+    os.environ.get("HERALD_TEST_DATA_ROOT", "~/.cache/mle-bench/data")
+).expanduser()
+REAL_COMPETITION_IDS: tuple[str, ...] = (
+    "tabular-playground-series-may-2022",
+    "spaceship-titanic",
+)
+_REPORT_SECTION_RE = re.compile(r"## (.+?)\n```json\n(.*?)\n```", re.DOTALL)
 
-    competition_dir = project_root / "competition"
-    competition_dir.mkdir(parents=True, exist_ok=True)
-    (competition_dir / "train.csv").write_text(
-        "id,feature,target\n1,0.1,0\n2,0.2,1\n",
-        encoding="utf-8",
-    )
-    (competition_dir / "test.csv").write_text(
-        "id,feature\n3,0.3\n",
-        encoding="utf-8",
-    )
-    (competition_dir / "sample_submission.csv").write_text(
-        "id,target\n3,0\n",
-        encoding="utf-8",
-    )
-    (competition_dir / "description.md").write_text(
-        "# Demo Competition\n\nmetric: auc\n",
-        encoding="utf-8",
-    )
+
+def _repo_root() -> Path:
+    """返回仓库根目录。"""
+
+    return Path(__file__).resolve().parents[2]
+
+
+def _skills_source() -> Path:
+    """返回 skills 源目录。"""
+
+    return _repo_root() / "core" / "prompts" / "skills"
+
+
+def _load_competition_manifest(competition_id: str) -> dict[str, object]:
+    """读取真实竞赛 manifest。"""
+
+    manifest_path = MANIFEST_DIR / f"{competition_id}.yaml"
+    return dict(yaml.safe_load(manifest_path.read_text(encoding="utf-8")))
+
+
+def _require_real_competition_dir(competition_id: str) -> Path:
+    """获取真实竞赛 public 数据目录，不可用时跳过测试。"""
+
+    if not _TEST_DATA_ROOT.exists():
+        pytest.skip(f"真实数据根目录不存在: {_TEST_DATA_ROOT}")
+
+    manifest = _load_competition_manifest(competition_id)
+    relative_root = str(manifest["relative_root"])
+    competition_dir = (_TEST_DATA_ROOT / relative_root).resolve()
+    if not competition_dir.exists():
+        pytest.skip(f"真实竞赛目录不存在: {competition_dir}")
+
+    required_public_files = manifest.get("required_public_files", [])
+    for file_name in required_public_files:
+        if not (competition_dir / str(file_name)).exists():
+            pytest.skip(f"竞赛目录缺少必需文件: {competition_dir / str(file_name)}")
+
     return competition_dir
 
 
-def _build_project_skills(project_root: Path) -> Path:
-    """构造最小 project skill。"""
+def _count_csv_rows(csv_path: Path) -> int:
+    """统计 CSV 数据行数（不含表头）。"""
 
-    skills_dir = project_root / ".claude" / "skills" / "demo-skill"
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    (skills_dir / "SKILL.md").write_text(
-        "# demo skill\n\nUse this skill for preview.\n",
-        encoding="utf-8",
+    with csv_path.open("r", encoding="utf-8", errors="ignore") as handle:
+        line_count = sum(1 for _ in handle)
+    return max(line_count - 1, 0)
+
+
+def _read_csv_columns(csv_path: Path) -> list[str]:
+    """读取 CSV 表头。"""
+
+    with csv_path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
+        reader = csv.reader(handle)
+        return [str(column) for column in next(reader)]
+
+
+def _parse_report_sections(report_text: str) -> dict[str, dict[str, object]]:
+    """把 Markdown 预览报告解析为 section -> payload。"""
+
+    sections: dict[str, dict[str, object]] = {}
+    for title, payload in _REPORT_SECTION_RE.findall(report_text):
+        sections[title] = dict(json.loads(payload))
+    return sections
+
+
+def _expected_target_columns(
+    sample_submission_path: Path,
+    test_path: Path,
+) -> list[str]:
+    """根据真实文件列名推导期望目标列。"""
+
+    sample_columns = _read_csv_columns(sample_submission_path)
+    test_columns = set(_read_csv_columns(test_path))
+    target_columns = [column for column in sample_columns if column not in test_columns]
+    if not target_columns and len(sample_columns) > 1:
+        return sample_columns[1:]
+    return target_columns
+
+
+def _run_python_script(
+    script_path: Path,
+    *args: str,
+    cwd: Path | None = None,
+) -> str:
+    """运行 skill 脚本并返回标准输出。"""
+
+    completed = subprocess.run(
+        [sys.executable, str(script_path), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=None if cwd is None else str(cwd),
     )
-    return skills_dir.parent
+    return completed.stdout
 
 
 def _make_execute_response(data_profile: str) -> str:
@@ -136,14 +214,12 @@ def _build_agent() -> AgentProfile:
 def test_feature_extract_execute_sees_visible_project_skills(tmp_path: Path) -> None:
     """execute 阶段在 working 目录下能看到 project skills。"""
 
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
-    competition_dir = _build_competition_dir(project_root)
-    project_skills_dir = _build_project_skills(project_root)
+    competition_dir = _require_real_competition_dir("tabular-playground-series-may-2022")
+    skills_source = _skills_source()
 
-    workspace = Workspace(project_root / "workspace")
+    workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
-    visible_skills_dir = workspace.expose_project_skills(project_root)
+    visible_skills_dir = workspace.expose_project_skills(skills_source)
 
     llm = RecordingLLM(
         responses=[
@@ -170,11 +246,15 @@ def test_feature_extract_execute_sees_visible_project_skills(tmp_path: Path) -> 
     assert solution.status == "completed"
     assert visible_skills_dir is not None
     assert visible_skills_dir.is_symlink()
-    assert visible_skills_dir.resolve() == project_skills_dir.resolve()
+    assert visible_skills_dir.resolve() == skills_source.resolve()
     assert execute_call["cwd"] == str(workspace.working_dir)
     assert "Skill" in execute_call["allowed_tools"]
     assert (
-        workspace.working_dir / ".claude" / "skills" / "demo-skill" / "SKILL.md"
+        workspace.working_dir
+        / ".claude"
+        / "skills"
+        / "feature-extract-data-preview"
+        / "SKILL.md"
     ).exists()
     assert workspace.summary()["project_skills_dir"] == str(visible_skills_dir)
 
@@ -182,13 +262,11 @@ def test_feature_extract_execute_sees_visible_project_skills(tmp_path: Path) -> 
 def test_feature_extract_execute_skips_missing_project_skills(tmp_path: Path) -> None:
     """缺少 project skills 时 execute 链路仍可继续。"""
 
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
-    competition_dir = _build_competition_dir(project_root)
+    competition_dir = _require_real_competition_dir("tabular-playground-series-may-2022")
 
-    workspace = Workspace(project_root / "workspace")
+    workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
-    visible_skills_dir = workspace.expose_project_skills(project_root)
+    visible_skills_dir = workspace.expose_project_skills(tmp_path / "nonexistent")
 
     llm = RecordingLLM(
         responses=[
@@ -218,3 +296,167 @@ def test_feature_extract_execute_skips_missing_project_skills(tmp_path: Path) ->
     assert "Skill" in execute_call["allowed_tools"]
     assert not (workspace.working_dir / ".claude" / "skills").exists()
     assert workspace.summary()["project_skills_dir"] == ""
+
+
+@pytest.mark.parametrize("competition_id", REAL_COMPETITION_IDS)
+def test_feature_extract_preview_skill_scripts_run_on_competition_dir(
+    tmp_path: Path,
+    competition_id: str,
+) -> None:
+    """真实 preview skill 脚本能在 working 目录中稳定运行。"""
+
+    competition_dir = _require_real_competition_dir(competition_id)
+
+    workspace = Workspace(tmp_path / competition_id / "workspace")
+    workspace.create(competition_dir)
+    visible_skills_dir = workspace.expose_project_skills(_skills_source())
+
+    assert visible_skills_dir is not None
+
+    script_path = (
+        workspace.working_dir
+        / ".claude"
+        / "skills"
+        / "feature-extract-data-preview"
+        / "scripts"
+        / "preview_competition.py"
+    )
+    output = _run_python_script(
+        script_path,
+        "--data-dir",
+        str(workspace.data_dir),
+        cwd=workspace.working_dir,
+    )
+    sections = _parse_report_sections(output)
+    inventory_payload = sections["文件清单"]
+    train_payload = sections["train 预览"]
+    test_payload = sections["test 预览"]
+    submission_payload = sections["sample_submission 约束"]
+
+    assert script_path.exists()
+    assert set(sections.keys()) == {
+        "文件清单",
+        "描述文件预览",
+        "train 预览",
+        "test 预览",
+        "sample_submission 约束",
+    }
+    assert inventory_payload["detected_files"] == {
+        "description": "description.md",
+        "train": "train.csv",
+        "test": "test.csv",
+        "sample_submission": "sample_submission.csv",
+    }
+    assert set(inventory_payload["visible_files"]) >= {
+        "description.md",
+        "train.csv",
+        "test.csv",
+        "sample_submission.csv",
+    }
+    assert train_payload["file_name"] == "train.csv"
+    assert test_payload["file_name"] == "test.csv"
+    assert submission_payload["file_name"] == "sample_submission.csv"
+    assert submission_payload["row_count_should_match_test"] == _count_csv_rows(
+        workspace.data_dir / "test.csv"
+    )
+
+
+@pytest.mark.parametrize("competition_id", REAL_COMPETITION_IDS)
+def test_feature_extract_preview_skill_output_covers_minimum_fields(
+    tmp_path: Path,
+    competition_id: str,
+) -> None:
+    """preview skill 输出覆盖 Task 14 规定的最小字段。"""
+
+    competition_dir = _require_real_competition_dir(competition_id)
+    manifest = _load_competition_manifest(competition_id)
+
+    workspace = Workspace(tmp_path / competition_id / "workspace")
+    workspace.create(competition_dir)
+    visible_skills_dir = workspace.expose_project_skills(_skills_source())
+
+    assert visible_skills_dir is not None
+
+    scripts_dir = (
+        workspace.working_dir
+        / ".claude"
+        / "skills"
+        / "feature-extract-data-preview"
+        / "scripts"
+    )
+
+    table_payload = json.loads(
+        _run_python_script(
+            scripts_dir / "preview_table.py",
+            "--file",
+            str(workspace.data_dir / "train.csv"),
+            cwd=workspace.working_dir,
+        )
+    )
+    submission_payload = json.loads(
+        _run_python_script(
+            scripts_dir / "preview_submission.py",
+            "--file",
+            str(workspace.data_dir / "sample_submission.csv"),
+            "--test-file",
+            str(workspace.data_dir / "test.csv"),
+            cwd=workspace.working_dir,
+        )
+    )
+    description_payload = json.loads(
+        _run_python_script(
+            scripts_dir / "preview_description.py",
+            "--file",
+            str(workspace.data_dir / "description.md"),
+            cwd=workspace.working_dir,
+        )
+    )
+    expected_train_rows = _count_csv_rows(workspace.data_dir / "train.csv")
+    expected_train_columns = _read_csv_columns(workspace.data_dir / "train.csv")
+    expected_submission_columns = _read_csv_columns(
+        workspace.data_dir / "sample_submission.csv"
+    )
+    expected_test_columns = _read_csv_columns(workspace.data_dir / "test.csv")
+    description_lines = (
+        workspace.data_dir / "description.md"
+    ).read_text(encoding="utf-8").splitlines()
+    expected_description_preview = "\n".join(description_lines[:40]).strip()
+
+    assert table_payload["file_name"] == "train.csv"
+    assert table_payload["total_rows"] == expected_train_rows
+    assert table_payload["sampled_rows"] == min(expected_train_rows, 2000)
+    assert table_payload["columns"] == expected_train_columns
+    assert table_payload["column_count"] == len(expected_train_columns)
+    assert table_payload["column_count"] >= 2
+    assert sum(table_payload["dtype_counts"].values()) == table_payload["column_count"]
+    assert (
+        len(table_payload["numeric_columns"]) + len(table_payload["non_numeric_columns"])
+        == table_payload["column_count"]
+    )
+    assert "missing_columns" in table_payload
+    assert len(table_payload["sample_records"]) == min(expected_train_rows, 5)
+
+    assert submission_payload["file_name"] == "sample_submission.csv"
+    assert submission_payload["column_order"] == expected_submission_columns
+    assert submission_payload["id_like_columns"] == [
+        column for column in expected_submission_columns if column in set(expected_test_columns)
+    ]
+    assert submission_payload["target_columns"] == _expected_target_columns(
+        workspace.data_dir / "sample_submission.csv",
+        workspace.data_dir / "test.csv",
+    )
+    assert submission_payload["row_count_should_match_test"] == _count_csv_rows(
+        workspace.data_dir / "test.csv"
+    )
+    assert len(submission_payload["sample_records"]) == min(
+        submission_payload["total_rows"],
+        5,
+    )
+
+    assert description_payload["file_name"] == "description.md"
+    assert description_payload["line_count"] == len(description_lines)
+    assert description_payload["preview"] == expected_description_preview
+    if str(manifest["metric_name"]).lower() in expected_description_preview.lower():
+        assert str(manifest["metric_name"]).lower() in {
+            metric.lower() for metric in description_payload["detected_metric_keywords"]
+        }

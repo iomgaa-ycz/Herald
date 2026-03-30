@@ -166,7 +166,8 @@ def main() -> None:
     workspace = Workspace(config.run.workspace_dir)
     workspace.create(config.run.competition_dir)
     project_root = Path(__file__).resolve().parents[1]
-    visible_skills_dir = workspace.expose_project_skills(project_root)
+    skills_source = project_root / "core" / "prompts" / "skills"
+    visible_skills_dir = workspace.expose_project_skills(skills_source)
     logger.info("工作空间已创建: %s", workspace.root)
     if visible_skills_dir is not None:
         logger.info("project skills 已暴露到 working 目录: %s", visible_skills_dir)

@@ -76,25 +76,23 @@ class Workspace:
         self._link_competition_data(competition_dir)
         return self
 
-    def expose_project_skills(self, project_root: str | Path) -> Path | None:
-        """将项目级 `.claude/skills/` 暴露到 working 目录。
+    def expose_project_skills(self, skills_source_dir: str | Path) -> Path | None:
+        """将 project skills 源目录暴露到 working 目录。
 
         Args:
-            project_root: 项目根目录
+            skills_source_dir: skills 源目录（如 ``core/prompts/skills``）
 
         Returns:
-            `working/.claude/skills` 路径；若项目根不存在 skills 目录则返回 `None`
+            ``working/.claude/skills`` 路径；若源目录不存在则返回 ``None``
         """
 
-        project_skills_dir = (
-            Path(project_root).expanduser().resolve() / ".claude" / "skills"
-        )
-        if not project_skills_dir.exists():
+        source = Path(skills_source_dir).expanduser().resolve()
+        if not source.exists():
             return None
 
         self.working_claude_dir.mkdir(parents=True, exist_ok=True)
         skills_link = self.visible_project_skills_dir
-        if skills_link.is_symlink() and skills_link.resolve() == project_skills_dir:
+        if skills_link.is_symlink() and skills_link.resolve() == source:
             return skills_link
 
         if skills_link.is_symlink() or skills_link.is_file():
@@ -102,7 +100,7 @@ class Workspace:
         elif skills_link.exists():
             shutil.rmtree(skills_link)
 
-        skills_link.symlink_to(project_skills_dir, target_is_directory=True)
+        skills_link.symlink_to(source, target_is_directory=True)
         return skills_link
 
     def _link_competition_data(self, competition_dir: Path) -> None:

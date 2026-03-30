@@ -16,45 +16,41 @@ def _build_competition_dir(tmp_path: Path) -> Path:
     return competition_dir
 
 
-def _build_project_skills(project_root: Path) -> Path:
-    """构造项目级 `.claude/skills/`。"""
+def _build_skills_source(tmp_path: Path) -> Path:
+    """构造 skills 源目录。"""
 
-    skills_dir = project_root / ".claude" / "skills" / "demo-skill"
+    skills_dir = tmp_path / "skills" / "demo-skill"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "SKILL.md").write_text("# demo skill\n", encoding="utf-8")
     return skills_dir.parent
 
 
 def test_expose_project_skills_creates_symlink(tmp_path: Path) -> None:
-    """存在 project skills 时会在 working 目录创建软链接。"""
+    """存在 skills 源目录时会在 working 目录创建软链接。"""
 
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
     competition_dir = _build_competition_dir(tmp_path)
-    expected_target = _build_project_skills(project_root)
+    skills_source = _build_skills_source(tmp_path)
 
-    workspace = Workspace(project_root / "workspace")
+    workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
 
-    skills_link = workspace.expose_project_skills(project_root)
+    skills_link = workspace.expose_project_skills(skills_source)
 
     assert skills_link is not None
     assert skills_link.is_symlink()
-    assert skills_link.resolve() == expected_target.resolve()
+    assert skills_link.resolve() == skills_source.resolve()
     assert (skills_link / "demo-skill" / "SKILL.md").exists()
 
 
 def test_expose_project_skills_skips_when_missing(tmp_path: Path) -> None:
-    """缺少 project skills 时安全跳过。"""
+    """skills 源目录不存在时安全跳过。"""
 
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
     competition_dir = _build_competition_dir(tmp_path)
 
-    workspace = Workspace(project_root / "workspace")
+    workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
 
-    skills_link = workspace.expose_project_skills(project_root)
+    skills_link = workspace.expose_project_skills(tmp_path / "nonexistent")
 
     assert skills_link is None
     assert not workspace.visible_project_skills_dir.exists()
@@ -63,14 +59,12 @@ def test_expose_project_skills_skips_when_missing(tmp_path: Path) -> None:
 def test_summary_exposes_project_skills_dir(tmp_path: Path) -> None:
     """工作空间摘要会暴露当前可见的 project skills 路径。"""
 
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
     competition_dir = _build_competition_dir(tmp_path)
-    _build_project_skills(project_root)
+    skills_source = _build_skills_source(tmp_path)
 
-    workspace = Workspace(project_root / "workspace")
+    workspace = Workspace(tmp_path / "workspace")
     workspace.create(competition_dir)
-    workspace.expose_project_skills(project_root)
+    workspace.expose_project_skills(skills_source)
 
     summary = workspace.summary()
 
