@@ -120,7 +120,7 @@
 - 优先在 `working_dir` 中完成实现与调试；生成的工件应与当前工作空间结构兼容。
 - 若 gene 描述与 plan 摘要存在不一致，以更具体、更新的方案为准，并在最终总结中说明取舍。
 - 可以使用当前 phase 提供的工具，但不要修改与本任务无关的全局基础设施。
-- 必须结合 `data_profile` 选择合适的数据读取、缺失值处理、特征编码与验证策略，不要忽略上游数据分析结论。
+- 必须结合 `data_profile` 选择合适的数据读取、缺失值处理、特征编码与验证策略，不要忽略上游数据分析结论。必须按 data_profile §6（运行环境）和 §7（训练建议）设置 n_jobs、GPU、验证折数等资源参数，禁止使用 n_jobs=-1。
 
 ## 代码要求
 
@@ -129,7 +129,7 @@
 - 必须将测试集预测结果保存为 submission.csv
 - 代码应在规定时间内运行完成
 - 运行 solution.py 时，必须使用以下命令将输出同时保存到日志文件，方便人类实时观察训练进度:
-  `set -o pipefail; python solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}`
+  `set -o pipefail; python -u solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}`
 
 # 输出格式
 
