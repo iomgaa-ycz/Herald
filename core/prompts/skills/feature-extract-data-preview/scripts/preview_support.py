@@ -121,6 +121,9 @@ def summarize_table_file(
     total_rows = _count_csv_rows(normalized_path)
     missing_columns = _build_missing_columns(dataframe)
 
+    numeric_cols = dataframe.select_dtypes(include=("number",)).columns.tolist()
+    non_numeric_cols = dataframe.select_dtypes(exclude=("number",)).columns.tolist()
+
     return {
         "file_name": normalized_path.name,
         "relative_parent": str(normalized_path.parent.name),
@@ -130,14 +133,21 @@ def summarize_table_file(
         "columns": [str(column) for column in dataframe.columns.tolist()],
         "dtype_counts": _build_dtype_counts(dataframe),
         "missing_columns": missing_columns,
-        "numeric_columns": [
-            str(column)
-            for column in dataframe.select_dtypes(include=("number",)).columns.tolist()
+        "numeric_columns": [str(c) for c in numeric_cols],
+        "non_numeric_columns": [str(c) for c in non_numeric_cols],
+        "numeric_stats": _build_numeric_stats(dataframe),
+        "categorical_stats": _build_categorical_stats(dataframe),
+        "high_cardinality_columns": [
+            str(c) for c in dataframe.columns if dataframe[c].nunique() > 1000
         ],
-        "non_numeric_columns": [
-            str(column)
-            for column in dataframe.select_dtypes(exclude=("number",)).columns.tolist()
-        ],
+        "string_pattern_columns": _detect_string_patterns(dataframe),
+        "target_analysis": _analyze_target(dataframe),
+        "datetime_columns": _detect_datetime_columns(dataframe),
+        "constant_columns": _detect_constant_columns(dataframe),
+        "feature_count_by_type": {
+            "numeric": len(numeric_cols),
+            "non_numeric": len(non_numeric_cols),
+        },
         "sample_records": _to_serializable_records(
             dataframe=dataframe,
             sample_rows=sample_rows,
@@ -304,6 +314,23 @@ def render_preview_report(
             )
         )
 
+    # 运行环境
+    env_info = collect_runtime_environment()
+    sections.append(_render_section(title="运行环境", payload=env_info))
+
+    # 训练建议（基于 train 数据摘要和环境信息）
+    if train_path is not None:
+        train_summary = summarize_table_file(
+            csv_path=train_path,
+            sample_rows=0,
+            profile_rows=profile_rows,
+        )
+        recommendations = generate_training_recommendations(
+            table_summary=train_summary,
+            env_info=env_info,
+        )
+        sections.append(_render_section(title="训练建议", payload=recommendations))
+
     return "\n\n".join(sections).strip()
 
 
@@ -396,6 +423,408 @@ def _to_serializable_records(
     preview_json = preview_frame.to_json(orient="records", force_ascii=False)
     raw_records = json.loads(preview_json)
     return [dict(record) for record in raw_records]
+
+
+def _build_numeric_stats(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
+    """构建数值特征统计摘要。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+
+    Returns:
+        每个数值列的 min/max/mean/std/q25/q75/skew/nunique。
+    """
+
+    numeric_df = dataframe.select_dtypes(include=("number",))
+    if numeric_df.empty:
+        return []
+
+    desc = numeric_df.describe().T
+    skew_values = numeric_df.skew()
+    nunique_values = numeric_df.nunique()
+
+    stats: list[dict[str, Any]] = []
+    for col in numeric_df.columns:
+        entry: dict[str, Any] = {"column": str(col)}
+        if col in desc.index:
+            entry["min"] = round(float(desc.loc[col, "min"]), 4)
+            entry["max"] = round(float(desc.loc[col, "max"]), 4)
+            entry["mean"] = round(float(desc.loc[col, "mean"]), 4)
+            entry["std"] = round(float(desc.loc[col, "std"]), 4)
+            entry["q25"] = round(float(desc.loc[col, "25%"]), 4)
+            entry["q75"] = round(float(desc.loc[col, "75%"]), 4)
+        if col in skew_values.index:
+            entry["skew"] = round(float(skew_values[col]), 4)
+        entry["nunique"] = int(nunique_values.get(col, 0))
+        stats.append(entry)
+    return stats
+
+
+def _build_categorical_stats(
+    dataframe: pd.DataFrame,
+    cardinality_threshold: int = 50,
+) -> list[dict[str, Any]]:
+    """构建类别特征统计摘要。
+
+    对非数值列以及 nunique < cardinality_threshold 的整数列进行统计。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+        cardinality_threshold: 整数列被视为类别的基数阈值。
+
+    Returns:
+        每个类别列的 nunique、top_values、dtype。
+    """
+
+    stats: list[dict[str, Any]] = []
+
+    # 非数值列
+    non_numeric = dataframe.select_dtypes(exclude=("number",))
+    for col in non_numeric.columns:
+        nunique = int(dataframe[col].nunique())
+        top_values = dataframe[col].value_counts().head(5).index.tolist()
+        stats.append({
+            "column": str(col),
+            "nunique": nunique,
+            "top_values": [str(v) for v in top_values],
+            "dtype": str(dataframe[col].dtype),
+        })
+
+    # 低基数整数列
+    int_cols = dataframe.select_dtypes(include=("integer",))
+    for col in int_cols.columns:
+        nunique = int(dataframe[col].nunique())
+        if nunique < cardinality_threshold:
+            top_values = dataframe[col].value_counts().head(5).index.tolist()
+            stats.append({
+                "column": str(col),
+                "nunique": nunique,
+                "top_values": [int(v) for v in top_values],
+                "dtype": str(dataframe[col].dtype),
+            })
+
+    return stats
+
+
+def _detect_string_patterns(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
+    """检测固定长度字符串特征模式。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+
+    Returns:
+        固定长度字符串列的 column/fixed_length/char_set/nunique。
+    """
+
+    object_cols = dataframe.select_dtypes(include=("object",))
+    patterns: list[dict[str, Any]] = []
+
+    for col in object_cols.columns:
+        sample = dataframe[col].dropna().head(200)
+        if sample.empty:
+            continue
+
+        lengths = sample.str.len()
+        if lengths.nunique() == 1:
+            fixed_len = int(lengths.iloc[0])
+            all_chars = set("".join(sample.astype(str).tolist()))
+            if all_chars.issubset(set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")):
+                char_set = "A-Z"
+            elif all_chars.issubset(set("abcdefghijklmnopqrstuvwxyz")):
+                char_set = "a-z"
+            elif all_chars.issubset(set("0123456789")):
+                char_set = "0-9"
+            else:
+                char_set = "".join(sorted(all_chars)[:20])
+
+            patterns.append({
+                "column": str(col),
+                "fixed_length": fixed_len,
+                "char_set": char_set,
+                "nunique": int(dataframe[col].nunique()),
+            })
+
+    return patterns
+
+
+def _analyze_target(dataframe: pd.DataFrame) -> dict[str, Any] | None:
+    """分析目标变量。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+
+    Returns:
+        目标变量的 column/task_type/class_distribution/is_balanced，
+        若无 target 列返回 None。
+    """
+
+    if "target" not in dataframe.columns:
+        return None
+
+    target = dataframe["target"]
+    nunique = int(target.nunique())
+
+    if nunique == 2:
+        task_type = "binary_classification"
+    elif 2 < nunique <= 20:
+        task_type = "multiclass_classification"
+    else:
+        task_type = "regression"
+
+    result: dict[str, Any] = {
+        "column": "target",
+        "task_type": task_type,
+        "nunique": nunique,
+    }
+
+    if task_type in ("binary_classification", "multiclass_classification"):
+        dist = target.value_counts(normalize=True).to_dict()
+        result["class_distribution"] = {
+            str(k): round(float(v), 4) for k, v in dist.items()
+        }
+        min_ratio = min(dist.values())
+        max_ratio = max(dist.values())
+        result["is_balanced"] = (max_ratio / max(min_ratio, 1e-9)) < 3.0
+    else:
+        result["value_range"] = {
+            "min": round(float(target.min()), 4),
+            "max": round(float(target.max()), 4),
+            "mean": round(float(target.mean()), 4),
+            "std": round(float(target.std()), 4),
+        }
+
+    return result
+
+
+def _detect_datetime_columns(dataframe: pd.DataFrame) -> list[str]:
+    """检测可能的日期/时间列。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+
+    Returns:
+        被检测为日期/时间的列名列表。
+    """
+
+    datetime_cols: list[str] = []
+    candidates = dataframe.select_dtypes(include=("object",)).columns.tolist()
+
+    # 也包含已识别为 datetime 的列
+    for col in dataframe.columns:
+        if pd.api.types.is_datetime64_any_dtype(dataframe[col]):
+            datetime_cols.append(str(col))
+
+    for col in candidates:
+        sample = dataframe[col].dropna().head(20)
+        if sample.empty:
+            continue
+        try:
+            pd.to_datetime(sample, infer_datetime_format=True)
+            datetime_cols.append(str(col))
+        except (ValueError, TypeError):
+            continue
+
+    return datetime_cols
+
+
+def _detect_constant_columns(dataframe: pd.DataFrame) -> list[str]:
+    """检测常量列（nunique == 1）。
+
+    Args:
+        dataframe: 已加载的 DataFrame。
+
+    Returns:
+        常量列名列表。
+    """
+
+    return [str(col) for col in dataframe.columns if dataframe[col].nunique() <= 1]
+
+
+def collect_runtime_environment() -> dict[str, Any]:
+    """探测本机运行环境。
+
+    Returns:
+        CPU 核数、内存、GPU 可用性等硬件信息。
+    """
+
+    import multiprocessing
+    import platform
+
+    env: dict[str, Any] = {
+        "cpu_count": multiprocessing.cpu_count(),
+        "platform": platform.system(),
+        "memory_gb": _get_memory_gb(),
+        "gpu_available": False,
+        "gpu_name": None,
+        "gpu_memory_gb": None,
+    }
+
+    env.update(_detect_gpu_via_nvidia_smi())
+
+    return env
+
+
+def _detect_gpu_via_nvidia_smi() -> dict[str, Any]:
+    """通过 nvidia-smi 检测 GPU（torch 未安装时的 fallback）。"""
+
+    import subprocess
+
+    result: dict[str, Any] = {
+        "gpu_available": False,
+        "gpu_name": None,
+        "gpu_memory_gb": None,
+    }
+    try:
+        output = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if output.returncode == 0 and output.stdout.strip():
+            line = output.stdout.strip().split("\n")[0]
+            name, mem_mb = line.split(",", 1)
+            result["gpu_available"] = True
+            result["gpu_name"] = name.strip()
+            result["gpu_memory_gb"] = round(float(mem_mb.strip()) / 1024, 1)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return result
+
+
+def _get_memory_gb() -> float | None:
+    """获取系统内存大小（GB）。"""
+
+    try:
+        import psutil
+
+        return round(psutil.virtual_memory().total / (1024**3), 1)
+    except ImportError:
+        pass
+
+    # Linux fallback
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal"):
+                    kb = int(line.split()[1])
+                    return round(kb / (1024**2), 1)
+    except (FileNotFoundError, ValueError):
+        pass
+
+    # macOS fallback
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return round(int(result.stdout.strip()) / (1024**3), 1)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+
+    return None
+
+
+def generate_training_recommendations(
+    table_summary: dict[str, Any],
+    env_info: dict[str, Any],
+) -> dict[str, Any]:
+    """根据数据规模和硬件生成表格竞赛训练建议。
+
+    Args:
+        table_summary: summarize_table_file() 返回的摘要。
+        env_info: collect_runtime_environment() 返回的环境信息。
+
+    Returns:
+        模型资源建议和验证集划分建议。
+    """
+
+    total_rows = table_summary.get("total_rows") or 0
+    cpu_count = env_info.get("cpu_count") or 4
+    gpu_available = env_info.get("gpu_available", False)
+    recommended_n_jobs = min(cpu_count, 16)
+
+    # 模型资源建议
+    model_recommendations: list[dict[str, Any]] = [
+        {
+            "model": "LightGBM",
+            "use_gpu": False,
+            "n_jobs": recommended_n_jobs,
+            "note": f"线程数建议 {recommended_n_jobs}（服务器 {cpu_count} 核，超 16 线程同步开销增大）",
+        },
+        {
+            "model": "XGBoost",
+            "use_gpu": gpu_available and total_rows > 1_000_000,
+            "n_jobs": recommended_n_jobs,
+            "note": "GPU tree_method='gpu_hist' 在 >100 万行时有优势"
+            if gpu_available
+            else f"无 GPU，CPU 模式 n_jobs={recommended_n_jobs}",
+        },
+        {
+            "model": "CatBoost",
+            "use_gpu": gpu_available and total_rows > 1_000_000,
+            "n_jobs": None,
+            "note": "GPU 原生支持" if gpu_available else "CPU 模式",
+        },
+    ]
+
+    if gpu_available:
+        model_recommendations.append({
+            "model": "PyTorch/NN",
+            "use_gpu": True,
+            "n_jobs": None,
+            "note": "深度学习强烈推荐使用 GPU",
+        })
+
+    # 验证集划分建议
+    target_analysis = table_summary.get("target_analysis")
+    datetime_cols = table_summary.get("datetime_columns", [])
+
+    if datetime_cols:
+        split_strategy = "time_based_split"
+        split_note = f"检测到时间列 {datetime_cols}，推荐按时间顺序划分"
+        n_folds = None
+    elif total_rows > 1_000_000:
+        split_strategy = "holdout_or_3fold"
+        split_note = f"数据量 {total_rows:,} 行较大，推荐 3-fold 或单次 holdout（节省时间）"
+        n_folds = 3
+    elif total_rows > 100_000:
+        split_strategy = "stratified_kfold"
+        split_note = "推荐 5-fold 或 3-fold CV"
+        n_folds = 5
+    else:
+        split_strategy = "stratified_kfold"
+        split_note = "数据量较小，推荐 5-fold 充分利用数据"
+        n_folds = 5
+
+    use_stratified = False
+    if target_analysis and target_analysis.get("task_type") in (
+        "binary_classification",
+        "multiclass_classification",
+    ):
+        use_stratified = True
+        if not target_analysis.get("is_balanced", True):
+            split_note += "；目标不平衡，必须使用 StratifiedKFold"
+
+    return {
+        "model_recommendations": model_recommendations,
+        "validation_split": {
+            "strategy": split_strategy,
+            "n_folds": n_folds,
+            "use_stratified": use_stratified,
+            "note": split_note,
+        },
+        "general_n_jobs": recommended_n_jobs,
+    }
 
 
 def _render_section(title: str, payload: dict[str, Any]) -> str:

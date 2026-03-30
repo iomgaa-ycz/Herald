@@ -13,7 +13,6 @@ import humanize
 import pandas as pd
 from genson import SchemaBuilder
 from pandas.api.types import is_numeric_dtype
-
 from utils.logger_system import log_msg
 
 # 代码文件类型（markdown 包裹）
@@ -244,8 +243,8 @@ def preview_image_dir(dir_path: Path, max_sample: int = 3) -> str:
         return ""
 
     try:
-        from PIL import Image
         import numpy as np
+        from PIL import Image
 
         samples = images[:max_sample]
         sizes = []
