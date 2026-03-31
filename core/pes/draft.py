@@ -13,6 +13,8 @@ from core.pes.submission import validate_submission_against_sample
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
 
+_BACKGROUND_TASK_PREFIX = "Command running in background with ID:"
+
 
 class DraftPES(BasePES):
     """DraftPES 的最小可运行版本。"""
@@ -357,6 +359,13 @@ class DraftPES(BasePES):
 
         return False
 
+    def _is_background_task_output(self, stdout: object) -> bool:
+        """检测 stdout 是否为后台任务通知文本。"""
+
+        if not isinstance(stdout, str):
+            return False
+        return stdout.strip().startswith(_BACKGROUND_TASK_PREFIX)
+
     def _fill_exec_fact_from_runtime_artifacts(
         self,
         exec_fact: dict[str, Any],
@@ -373,11 +382,24 @@ class DraftPES(BasePES):
             return exec_fact
 
         filled_fact = dict(exec_fact)
+
+        # 后台执行模式检测：stdout 包含后台任务通知，视为无效
+        if self._is_background_task_output(filled_fact.get("stdout")):
+            filled_fact["stdout"] = None
+
+        # Phase 1: 补全 stdout（优先 stdout.log，fallback run.log）
         if filled_fact.get("stdout") in (None, ""):
-            filled_fact["stdout"] = read_artifact("stdout.log")
+            for artifact_name in ("stdout.log", "run.log"):
+                content = read_artifact(artifact_name)
+                if content not in (None, ""):
+                    filled_fact["stdout"] = content
+                    break
+
+        # Phase 2: 补全 stderr
         if filled_fact.get("stderr") in (None, ""):
             filled_fact["stderr"] = read_artifact("stderr.log")
 
+        # Phase 3: 加载 metrics.json
         metrics = self._load_metrics_artifact()
         if metrics is not None:
             filled_fact["metrics"] = metrics
@@ -871,7 +893,8 @@ class DraftPES(BasePES):
         workspace_data_dir = getattr(self.workspace, "data_dir", None)
         if isinstance(workspace_data_dir, (str, Path)):
             candidate_paths.append(
-                Path(workspace_data_dir).expanduser().resolve() / "sample_submission.csv"
+                Path(workspace_data_dir).expanduser().resolve()
+                / "sample_submission.csv"
             )
         for candidate_path in candidate_paths:
             if candidate_path.exists():
@@ -920,8 +943,10 @@ class DraftPES(BasePES):
         save_version = getattr(self.workspace, "save_version", None)
         read_solution = getattr(self.workspace, "read_working_solution", None)
         read_submission = getattr(self.workspace, "read_working_submission", None)
-        if not callable(save_version) or not callable(read_solution) or not callable(
-            read_submission
+        if (
+            not callable(save_version)
+            or not callable(read_solution)
+            or not callable(read_submission)
         ):
             return None
 
