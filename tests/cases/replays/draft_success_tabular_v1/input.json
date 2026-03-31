@@ -1,5 +1,6 @@
 {
-  "competition_id": "demo-tabular",
+  "competition_id": "tabular-playground-series-may-2022",
   "task_type": "tabular",
-  "metric_name": "auc"
+  "metric_name": "auc",
+  "metric_direction": "maximize"
 }

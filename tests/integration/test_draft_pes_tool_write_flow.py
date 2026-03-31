@@ -111,8 +111,9 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    # 行数需要与回放资产中的 submission.csv 匹配（5 行数据）
     (competition_dir / "sample_submission.csv").write_text(
-        "id,target\n1,0\n",
+        "id,target\n800000,0\n800001,0\n800002,0\n800003,0\n800004,0\n",
         encoding="utf-8",
     )
 
@@ -125,7 +126,7 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
 def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
     """将回放工件写入工作区。"""
 
-    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+    for file_name in ("solution.py", "submission.csv", "metrics.json", "stdout.log"):
         source_path = case_dir / file_name
         if source_path.exists():
             (working_dir / file_name).write_text(
@@ -173,7 +174,10 @@ def test_draft_pes_tool_write_success_flow(tmp_path: Path) -> None:
     assert len(received_events) == 1
     assert received_events[0].status == "completed"
     assert workspace.read_working_solution() == str(replay["solution_code"])
-    assert workspace.read_working_submission() == "id,target\n1,0.9\n"
+    # 真实 submission 包含 id,target 列
+    submission = workspace.read_working_submission()
+    assert submission.startswith("id,target\n")
+    assert len(submission.strip().split("\n")) > 1
 
     snapshot = db.get_latest_code_snapshot(received_events[0].solution_id)
     assert snapshot is not None

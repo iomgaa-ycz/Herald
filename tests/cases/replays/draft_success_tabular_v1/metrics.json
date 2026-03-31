@@ -1,1 +1,1 @@
-{"val_metric_name":"accuracy","val_metric_value":0.81,"val_metric_direction":"max"}
+{"val_metric_name": "auc", "val_metric_value": 0.9898206993791899, "val_metric_direction": "max"}

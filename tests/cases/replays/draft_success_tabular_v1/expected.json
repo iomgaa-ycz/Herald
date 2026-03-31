@@ -1,4 +1,8 @@
 {
   "status": "completed",
-  "artifact": "working/solution.py"
+  "metric_name": "auc",
+  "metric_value": 0.9898206993791899,
+  "exec_command": "set -o pipefail; python -u solution.py 2>&1 | tee -a /home/yuchengzhang/Code/Herald2/workspace/working/run.log",
+  "exit_code": 0,
+  "duration_ms": null
 }

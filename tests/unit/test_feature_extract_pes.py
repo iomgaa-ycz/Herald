@@ -235,15 +235,15 @@ def test_feature_extract_yaml_config_loads() -> None:
     assert config.get_phase("plan").max_turns == 3
 
 
-# data_profile.md 固定标题结构中的 6 个必需 section 标题
+# data_profile.md 固定标题结构中的必需 section 关键词（不含编号，真实 LLM 可能调整编号）
 DATA_PROFILE_REQUIRED_SECTIONS = (
     "# 数据概况报告",
-    "## 1. 数据集概览",
-    "## 2. 特征分析",
-    "## 3. 缺失值",
-    "## 4. 目标变量",
-    "## 5. 提交格式",
-    "## 6. 关键发现与建模建议",
+    "数据集概览",
+    "特征分析",
+    "缺失值",
+    "目标变量",
+    "提交格式",
+    "关键发现与建模建议",
 )
 
 

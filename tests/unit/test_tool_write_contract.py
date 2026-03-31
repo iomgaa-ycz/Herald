@@ -104,8 +104,9 @@ def _build_workspace_and_db(tmp_path: Path) -> tuple[Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    # 行数需要与回放资产中的 submission.csv 匹配（5 行数据）
     (competition_dir / "sample_submission.csv").write_text(
-        "id,target\n1,0\n",
+        "id,target\n800000,0\n800001,0\n800002,0\n800003,0\n800004,0\n",
         encoding="utf-8",
     )
 
@@ -141,7 +142,7 @@ def _build_pes(
 def _write_success_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
     """将成功回放所需工件写入工作区。"""
 
-    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+    for file_name in ("solution.py", "submission.csv", "metrics.json", "stdout.log"):
         source_path = case_dir / file_name
         if source_path.exists():
             (working_dir / file_name).write_text(
@@ -165,7 +166,7 @@ def test_execute_reads_non_empty_solution_file_from_workspace(tmp_path: Path) ->
     asyncio.run(pes.execute_phase(solution))
 
     assert workspace.read_working_solution() == str(replay["solution_code"])
-    assert "python solution.py" in solution.execute_summary
+    assert "solution.py" in solution.execute_summary
     assert "exit_code=0" in solution.execute_summary
     assert solution.solution_file_path == str(
         workspace.get_working_file_path("solution.py")

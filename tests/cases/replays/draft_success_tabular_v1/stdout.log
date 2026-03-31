@@ -1,2 +1,217 @@
-training done
-submission written to submission.csv
+============================================================
+Tabular Playground Series - May 2022
+目标: 二分类 AUC 最大化, 5-fold CV
+============================================================
+[DATA] 加载数据 from /home/yuchengzhang/Code/Herald2/workspace/data
+[DATA] 训练集: (800000, 33), 测试集: (100000, 32)
+[FEAT] 开始特征工程...
+[FEAT] 特征工程完成，最终特征数: 73，耗时: 15.4s
+
+[TRAIN] X_train: (800000, 73), X_test: (100000, 73)
+
+========================================
+[LGB] 开始 LightGBM 训练...
+========================================
+Training until validation scores don't improve for 100 rounds
+[200]	valid_0's auc: 0.973969
+[400]	valid_0's auc: 0.984451
+[600]	valid_0's auc: 0.98706
+[800]	valid_0's auc: 0.988027
+[1000]	valid_0's auc: 0.988657
+[1200]	valid_0's auc: 0.98903
+[1400]	valid_0's auc: 0.989411
+[1600]	valid_0's auc: 0.989673
+[1800]	valid_0's auc: 0.989796
+[2000]	valid_0's auc: 0.990022
+[2200]	valid_0's auc: 0.990121
+[2400]	valid_0's auc: 0.990215
+[2600]	valid_0's auc: 0.99031
+[2800]	valid_0's auc: 0.990385
+[3000]	valid_0's auc: 0.990463
+Did not meet early stopping. Best iteration is:
+[2997]	valid_0's auc: 0.990464
+  [LGB] Fold 0: AUC = 0.990464, best_iter = 2997, 耗时 67.2s
+Training until validation scores don't improve for 100 rounds
+[200]	valid_0's auc: 0.973267
+[400]	valid_0's auc: 0.983872
+[600]	valid_0's auc: 0.986708
+[800]	valid_0's auc: 0.987795
+[1000]	valid_0's auc: 0.988567
+[1200]	valid_0's auc: 0.988943
+[1400]	valid_0's auc: 0.989297
+[1600]	valid_0's auc: 0.989599
+[1800]	valid_0's auc: 0.989717
+[2000]	valid_0's auc: 0.989856
+[2200]	valid_0's auc: 0.989979
+[2400]	valid_0's auc: 0.990126
+[2600]	valid_0's auc: 0.990199
+[2800]	valid_0's auc: 0.990271
+[3000]	valid_0's auc: 0.990367
+Did not meet early stopping. Best iteration is:
+[2997]	valid_0's auc: 0.990367
+  [LGB] Fold 1: AUC = 0.990367, best_iter = 2997, 耗时 67.6s
+Training until validation scores don't improve for 100 rounds
+[200]	valid_0's auc: 0.973202
+[400]	valid_0's auc: 0.983948
+[600]	valid_0's auc: 0.986893
+[800]	valid_0's auc: 0.987862
+[1000]	valid_0's auc: 0.988529
+[1200]	valid_0's auc: 0.988901
+[1400]	valid_0's auc: 0.989282
+[1600]	valid_0's auc: 0.989497
+[1800]	valid_0's auc: 0.989674
+[2000]	valid_0's auc: 0.989809
+[2200]	valid_0's auc: 0.989969
+[2400]	valid_0's auc: 0.990094
+[2600]	valid_0's auc: 0.990173
+[2800]	valid_0's auc: 0.990285
+[3000]	valid_0's auc: 0.990321
+Did not meet early stopping. Best iteration is:
+[2965]	valid_0's auc: 0.990325
+  [LGB] Fold 2: AUC = 0.990325, best_iter = 2965, 耗时 91.3s
+Training until validation scores don't improve for 100 rounds
+[200]	valid_0's auc: 0.974462
+[400]	valid_0's auc: 0.984327
+[600]	valid_0's auc: 0.987203
+[800]	valid_0's auc: 0.988307
+[1000]	valid_0's auc: 0.988984
+[1200]	valid_0's auc: 0.989402
+[1400]	valid_0's auc: 0.989712
+[1600]	valid_0's auc: 0.989903
+[1800]	valid_0's auc: 0.990068
+[2000]	valid_0's auc: 0.990198
+[2200]	valid_0's auc: 0.990321
+[2400]	valid_0's auc: 0.990465
+[2600]	valid_0's auc: 0.990529
+Early stopping, best iteration is:
+[2622]	valid_0's auc: 0.990546
+  [LGB] Fold 3: AUC = 0.990546, best_iter = 2622, 耗时 61.4s
+Training until validation scores don't improve for 100 rounds
+[200]	valid_0's auc: 0.974667
+[400]	valid_0's auc: 0.984933
+[600]	valid_0's auc: 0.987771
+[800]	valid_0's auc: 0.988855
+[1000]	valid_0's auc: 0.989355
+[1200]	valid_0's auc: 0.989797
+[1400]	valid_0's auc: 0.990073
+[1600]	valid_0's auc: 0.990277
+[1800]	valid_0's auc: 0.990458
+[2000]	valid_0's auc: 0.990584
+[2200]	valid_0's auc: 0.990717
+[2400]	valid_0's auc: 0.990785
+[2600]	valid_0's auc: 0.990862
+[2800]	valid_0's auc: 0.990918
+[3000]	valid_0's auc: 0.990985
+Did not meet early stopping. Best iteration is:
+[2978]	valid_0's auc: 0.990988
+  [LGB] Fold 4: AUC = 0.990988, best_iter = 2978, 耗时 67.7s
+
+[LGB] CV AUC = 0.990533
+
+========================================
+[XGB] 开始 XGBoost 训练...
+========================================
+[0]	val-auc:0.75183
+[200]	val-auc:0.96725
+[400]	val-auc:0.97635
+[600]	val-auc:0.98066
+[800]	val-auc:0.98310
+[1000]	val-auc:0.98445
+[1200]	val-auc:0.98550
+[1400]	val-auc:0.98606
+[1600]	val-auc:0.98643
+[1800]	val-auc:0.98672
+[2000]	val-auc:0.98698
+[2200]	val-auc:0.98714
+[2400]	val-auc:0.98724
+[2600]	val-auc:0.98733
+[2800]	val-auc:0.98739
+[2999]	val-auc:0.98747
+  [XGB] Fold 0: AUC = 0.987468, best_iter = 2999, 耗时 76.3s
+[0]	val-auc:0.73072
+[200]	val-auc:0.96586
+[400]	val-auc:0.97521
+[600]	val-auc:0.97988
+[800]	val-auc:0.98227
+[1000]	val-auc:0.98377
+[1200]	val-auc:0.98492
+[1400]	val-auc:0.98572
+[1600]	val-auc:0.98615
+[1800]	val-auc:0.98658
+[2000]	val-auc:0.98681
+[2200]	val-auc:0.98690
+[2400]	val-auc:0.98704
+[2600]	val-auc:0.98711
+[2800]	val-auc:0.98717
+[2999]	val-auc:0.98725
+  [XGB] Fold 1: AUC = 0.987253, best_iter = 2998, 耗时 55.4s
+[0]	val-auc:0.73090
+[200]	val-auc:0.96617
+[400]	val-auc:0.97636
+[600]	val-auc:0.98055
+[800]	val-auc:0.98268
+[1000]	val-auc:0.98401
+[1200]	val-auc:0.98507
+[1400]	val-auc:0.98573
+[1600]	val-auc:0.98616
+[1800]	val-auc:0.98659
+[2000]	val-auc:0.98682
+[2200]	val-auc:0.98693
+[2400]	val-auc:0.98706
+[2600]	val-auc:0.98715
+[2800]	val-auc:0.98722
+[2999]	val-auc:0.98731
+  [XGB] Fold 2: AUC = 0.987309, best_iter = 2996, 耗时 68.3s
+[0]	val-auc:0.73805
+[200]	val-auc:0.96715
+[400]	val-auc:0.97685
+[600]	val-auc:0.98110
+[800]	val-auc:0.98308
+[1000]	val-auc:0.98457
+[1200]	val-auc:0.98562
+[1400]	val-auc:0.98627
+[1600]	val-auc:0.98677
+[1800]	val-auc:0.98709
+[2000]	val-auc:0.98735
+[2200]	val-auc:0.98757
+[2400]	val-auc:0.98771
+[2600]	val-auc:0.98779
+[2800]	val-auc:0.98785
+[2999]	val-auc:0.98792
+  [XGB] Fold 3: AUC = 0.987920, best_iter = 2989, 耗时 55.0s
+[0]	val-auc:0.73630
+[200]	val-auc:0.96660
+[400]	val-auc:0.97576
+[600]	val-auc:0.98046
+[800]	val-auc:0.98288
+[1000]	val-auc:0.98464
+[1200]	val-auc:0.98569
+[1400]	val-auc:0.98629
+[1600]	val-auc:0.98670
+[1800]	val-auc:0.98713
+[2000]	val-auc:0.98740
+[2200]	val-auc:0.98756
+[2400]	val-auc:0.98768
+[2600]	val-auc:0.98779
+[2800]	val-auc:0.98788
+[2999]	val-auc:0.98795
+  [XGB] Fold 4: AUC = 0.987952, best_iter = 2999, 耗时 54.9s
+
+[XGB] CV AUC = 0.987581
+
+========================================
+[ENS] 模型集成...
+========================================
+  权重: LGB=0.5007, XGB=0.4993
+
+[ENS] Ensemble CV AUC = 0.989821
+
+[OUT] 提交文件已保存: /home/yuchengzhang/Code/Herald2/workspace/working/submission.csv
+[OUT] 提交文件形状: (100000, 2)
+[OUT] 预测值范围: [0.0000, 1.0000]
+
+============================================================
+最终结果: AUC = 0.989821
+============================================================
+{"metric_name": "auc", "metric_value": 0.9898206993791899, "model_type": "lgb+xgb_ensemble", "submission_path": "/home/yuchengzhang/Code/Herald2/workspace/working/submission.csv", "lgb_cv_auc": 0.9905334483856358, "xgb_cv_auc": 0.9875805269092484}
+

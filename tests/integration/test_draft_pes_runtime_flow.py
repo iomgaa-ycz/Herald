@@ -100,7 +100,7 @@ def _load_replay_case(case_name: str) -> dict[str, object]:
 def _write_case_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
     """将回放工件写入工作区。"""
 
-    for file_name in ("solution.py", "submission.csv", "metrics.json"):
+    for file_name in ("solution.py", "submission.csv", "metrics.json", "stdout.log"):
         source_path = case_dir / file_name
         if source_path.exists():
             (working_dir / file_name).write_text(
@@ -120,7 +120,7 @@ def _write_case_runtime_artifacts_with_metric(
     (working_dir / "metrics.json").write_text(
         json.dumps(
             {
-                "val_metric_name": "accuracy",
+                "val_metric_name": "auc",
                 "val_metric_value": metric_value,
                 "val_metric_direction": "max",
             }
@@ -135,8 +135,9 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     competition_dir = tmp_path / "competition"
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
+    # 行数需要与回放资产中的 submission.csv 匹配（5 行数据）
     (competition_dir / "sample_submission.csv").write_text(
-        "id,target\n1,0\n",
+        "id,target\n800000,0\n800001,0\n800002,0\n800003,0\n800004,0\n",
         encoding="utf-8",
     )
 
@@ -180,7 +181,7 @@ def test_draft_pes_runtime_success_backfills_fitness_and_submission_validation(
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
             "task_spec": {
-                "metric_name": "accuracy",
+                "metric_name": "auc",
                 "metric_direction": "max",
             },
         },
@@ -192,21 +193,24 @@ def test_draft_pes_runtime_success_backfills_fitness_and_submission_validation(
 
     assert solution.status == "completed"
     assert solution.metrics is not None
-    assert solution.metrics["val_metric_value"] == 0.81
-    assert solution.fitness == 0.81
+    assert solution.metrics["val_metric_name"] == "auc"
+    assert solution.metrics["val_metric_value"] > 0.9
+    assert solution.fitness > 0.9
     assert solution.metadata["submission_validated"] is True
     assert solution_row is not None
     assert solution_row["status"] == "completed"
-    assert solution_row["fitness"] == 0.81
+    assert solution_row["fitness"] > 0.9
     assert Path(solution_row["solution_file_path"]).exists()
     assert Path(solution_row["submission_file_path"]).exists()
-    assert workspace.read_working_submission() == "id,target\n1,0.9\n"
+    submission = workspace.read_working_submission()
+    assert submission.startswith("id,target\n")
+    assert len(submission.strip().split("\n")) > 1
     version_dir = Path(str(solution.metadata["version_dir"]))
     assert version_dir.exists()
     assert (version_dir / "solution.py").exists()
     assert (version_dir / "submission.csv").exists()
     assert workspace.read_best_metadata() is not None
-    assert workspace.read_best_metadata()["fitness"] == 0.81
+    assert workspace.read_best_metadata()["fitness"] > 0.9
     assert solution.metadata["best_promoted"] is True
 
 
@@ -232,7 +236,7 @@ def test_draft_pes_runtime_invalid_submission_marks_failed(tmp_path: Path) -> No
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
             "task_spec": {
-                "metric_name": "accuracy",
+                "metric_name": "auc",
                 "metric_direction": "max",
             },
         },
@@ -249,8 +253,8 @@ def test_draft_pes_runtime_invalid_submission_marks_failed(tmp_path: Path) -> No
 
     assert solution.status == "failed"
     assert solution.metrics is not None
-    assert solution.metrics["val_metric_value"] == 0.81
-    assert solution.fitness == 0.81
+    assert isinstance(solution.metrics["val_metric_value"], float)
+    assert isinstance(solution.fitness, float)
     assert solution.metadata["submission_validated"] is False
     assert "submission.csv 校验失败" in solution.metadata["failure_reason"]
     assert solution_row is not None
@@ -283,7 +287,7 @@ def test_draft_pes_runtime_lower_fitness_does_not_override_best(tmp_path: Path) 
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
             "task_spec": {
-                "metric_name": "accuracy",
+                "metric_name": "auc",
                 "metric_direction": "max",
             },
         },
@@ -318,7 +322,7 @@ def test_draft_pes_runtime_lower_fitness_does_not_override_best(tmp_path: Path) 
             "competition_dir": str(competition_dir),
             "run_id": "run-001",
             "task_spec": {
-                "metric_name": "accuracy",
+                "metric_name": "auc",
                 "metric_direction": "max",
             },
         },

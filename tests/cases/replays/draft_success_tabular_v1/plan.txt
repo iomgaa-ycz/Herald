@@ -1,1 +1,1 @@
-先生成一个最小可运行的 tabular baseline，并把代码真实写入 working/solution.py。
+(plan phase 无文本输出)
