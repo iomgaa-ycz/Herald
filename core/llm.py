@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,8 +13,27 @@ from claude_agent_sdk import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
     query,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _text_from_content(content: str | list[dict[str, Any]] | None) -> str:
+    """从 ToolResultBlock.content 提取纯文本。"""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    # list[dict] 形式，如 [{"type": "text", "text": "..."}]
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            text = item.get("text", "")
+            if text:
+                parts.append(text)
+    return "\n".join(parts)
 
 
 @dataclass(slots=True)
@@ -138,6 +158,32 @@ class LLMClient:
                             target["result"] = block.content
                 if turn["text"] or turn["tool_calls"]:
                     turns.append(turn)
+
+            elif isinstance(message, UserMessage):
+                # tool_use_result 是 CLI 级结构化数据（含 stdout/stderr），
+                # 但没有 exit_code 也没有 parent_tool_use_id 关联。
+                # ToolResultBlock 有 tool_use_id 关联和 is_error 标记。
+                # 策略：通过 ToolResultBlock.tool_use_id 关联，合并两者。
+                cli_result = (
+                    message.tool_use_result
+                    if isinstance(message.tool_use_result, dict)
+                    else {}
+                )
+                content = message.content
+                if isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, ToolResultBlock):
+                            continue
+                        target = pending_tool_calls.get(block.tool_use_id)
+                        if target is None:
+                            continue
+                        result: dict[str, Any] = {}
+                        result["stdout"] = cli_result.get(
+                            "stdout"
+                        ) or _text_from_content(block.content)
+                        result["stderr"] = cli_result.get("stderr", "")
+                        result["exit_code"] = 1 if block.is_error else 0
+                        target["result"] = result
 
             elif isinstance(message, ResultMessage):
                 usage = message.usage or {}
