@@ -82,7 +82,7 @@
 
 `data_profile` 的值必须是完整的 Markdown 文本，严格遵循 `feature-extract-report-format` skill 定义的 8 section 标题和顺序（§1 数据集概览 ~ §8 关键发现与建模建议）。若某个 section 信息不足，使用"信息不足"标注，但**不能省略该 section 标题**。
 
-**数据权威性规则**: §6 运行环境和 §7 训练建议中的数值（CPU 核数、n_jobs 推荐值、GPU 信息等）**必须忠实引用预览工具的脚本输出**，禁止用自身推断覆写。例如，脚本输出 `n_jobs: 16` 则必须写 `n_jobs: 16`，不可改为 `n_jobs: -1`。
+**数据权威性规则**: §6 运行环境和 §7 训练建议中的数值**必须忠实引用预览工具的脚本输出**，禁止用自身推断覆写。n_jobs 必须引用 `recommended_n_jobs` 字段值（非 `cpu_count`）。例如，脚本输出 `recommended_n_jobs: 16` 则必须写 `n_jobs: 16`，即使 `cpu_count: 192` 也不可写 `n_jobs: 192`。
 
 **注意**：
 - JSON 必须是合法的、可解析的

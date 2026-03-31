@@ -67,11 +67,12 @@ python .claude/skills/feature-extract-data-preview/scripts/preview_submission.py
 
 脚本输出的以下字段是经过硬件检测和算法计算的**权威值**，编写 data_profile 时**必须忠实引用，禁止用自身推断覆写**：
 
-- **运行环境**：CPU 核数、内存大小、GPU 型号与显存（来自 `collect_runtime_environment()`）
+- **运行环境**：CPU 核数、`recommended_n_jobs`、内存大小、GPU 型号与显存（来自 `collect_runtime_environment()`）
 - **训练建议**：n_jobs 推荐值、GPU 配置建议、验证策略（来自 `generate_training_recommendations()`）
 - **数值统计量**：min/max/mean/std/skew/nunique（来自 `_build_numeric_stats()`）
 
-违反此规则的典型错误：脚本输出 `n_jobs: 16`，但 data_profile 中写成 `n_jobs: -1`。
+**n_jobs 字段规则**：报告中所有 n_jobs 必须引用 `recommended_n_jobs` 字段值（该值已考虑同步开销上限），**禁止使用 `cpu_count`**。
+典型错误：`cpu_count: 192` 时直接写 `n_jobs: 192`——正确做法是引用 `recommended_n_jobs: 16`。
 
 ## 使用约束
 

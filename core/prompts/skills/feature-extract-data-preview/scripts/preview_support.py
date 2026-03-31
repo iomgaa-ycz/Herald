@@ -226,7 +226,9 @@ def summarize_submission_constraints(
         "total_rows": _count_csv_rows(sample_path),
         "column_order": sample_columns,
         "target_columns": target_columns,
-        "id_like_columns": [column for column in sample_columns if column in test_columns],
+        "id_like_columns": [
+            column for column in sample_columns if column in test_columns
+        ],
         "row_count_should_match_test": expected_test_rows,
         "sample_records": _to_serializable_records(
             dataframe=sample_dataframe,
@@ -264,7 +266,9 @@ def render_preview_report(
         )
     ]
 
-    description_path = _resolve_relative_file(normalized_dir, detected_files["description"])
+    description_path = _resolve_relative_file(
+        normalized_dir, detected_files["description"]
+    )
     if description_path is not None:
         sections.append(
             _render_section(
@@ -408,7 +412,9 @@ def _build_missing_columns(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
             }
         )
 
-    missing_items.sort(key=lambda item: (-int(item["missing_count"]), str(item["column"])))
+    missing_items.sort(
+        key=lambda item: (-int(item["missing_count"]), str(item["column"]))
+    )
     return missing_items
 
 
@@ -483,12 +489,14 @@ def _build_categorical_stats(
     for col in non_numeric.columns:
         nunique = int(dataframe[col].nunique())
         top_values = dataframe[col].value_counts().head(5).index.tolist()
-        stats.append({
-            "column": str(col),
-            "nunique": nunique,
-            "top_values": [str(v) for v in top_values],
-            "dtype": str(dataframe[col].dtype),
-        })
+        stats.append(
+            {
+                "column": str(col),
+                "nunique": nunique,
+                "top_values": [str(v) for v in top_values],
+                "dtype": str(dataframe[col].dtype),
+            }
+        )
 
     # 低基数整数列
     int_cols = dataframe.select_dtypes(include=("integer",))
@@ -496,12 +504,14 @@ def _build_categorical_stats(
         nunique = int(dataframe[col].nunique())
         if nunique < cardinality_threshold:
             top_values = dataframe[col].value_counts().head(5).index.tolist()
-            stats.append({
-                "column": str(col),
-                "nunique": nunique,
-                "top_values": [int(v) for v in top_values],
-                "dtype": str(dataframe[col].dtype),
-            })
+            stats.append(
+                {
+                    "column": str(col),
+                    "nunique": nunique,
+                    "top_values": [int(v) for v in top_values],
+                    "dtype": str(dataframe[col].dtype),
+                }
+            )
 
     return stats
 
@@ -537,12 +547,14 @@ def _detect_string_patterns(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
             else:
                 char_set = "".join(sorted(all_chars)[:20])
 
-            patterns.append({
-                "column": str(col),
-                "fixed_length": fixed_len,
-                "char_set": char_set,
-                "nunique": int(dataframe[col].nunique()),
-            })
+            patterns.append(
+                {
+                    "column": str(col),
+                    "fixed_length": fixed_len,
+                    "char_set": char_set,
+                    "nunique": int(dataframe[col].nunique()),
+                }
+            )
 
     return patterns
 
@@ -650,8 +662,12 @@ def collect_runtime_environment() -> dict[str, Any]:
     import multiprocessing
     import platform
 
+    cpu_count = multiprocessing.cpu_count()
+    recommended_n_jobs = min(cpu_count, 16)
+
     env: dict[str, Any] = {
-        "cpu_count": multiprocessing.cpu_count(),
+        "cpu_count": cpu_count,
+        "recommended_n_jobs": recommended_n_jobs,
         "platform": platform.system(),
         "memory_gb": _get_memory_gb(),
         "gpu_available": False,
@@ -778,12 +794,14 @@ def generate_training_recommendations(
     ]
 
     if gpu_available:
-        model_recommendations.append({
-            "model": "PyTorch/NN",
-            "use_gpu": True,
-            "n_jobs": None,
-            "note": "深度学习强烈推荐使用 GPU",
-        })
+        model_recommendations.append(
+            {
+                "model": "PyTorch/NN",
+                "use_gpu": True,
+                "n_jobs": None,
+                "note": "深度学习强烈推荐使用 GPU",
+            }
+        )
 
     # 验证集划分建议
     target_analysis = table_summary.get("target_analysis")
@@ -795,7 +813,9 @@ def generate_training_recommendations(
         n_folds = None
     elif total_rows > 1_000_000:
         split_strategy = "holdout_or_3fold"
-        split_note = f"数据量 {total_rows:,} 行较大，推荐 3-fold 或单次 holdout（节省时间）"
+        split_note = (
+            f"数据量 {total_rows:,} 行较大，推荐 3-fold 或单次 holdout（节省时间）"
+        )
         n_folds = 3
     elif total_rows > 100_000:
         split_strategy = "stratified_kfold"

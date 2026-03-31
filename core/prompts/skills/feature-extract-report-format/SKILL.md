@@ -53,13 +53,14 @@ description: >-
 - 行数约束: <应与 test 行数一致，写明具体数字>
 
 ## 6. 运行环境
-- CPU: <核数> [必须引用预览工具输出]
+- CPU 核数: <引用 `cpu_count` 字段>
+- 推荐 n_jobs: <引用 `recommended_n_jobs` 字段，**禁止使用 cpu_count**>
 - 内存: <GB> [必须引用预览工具输出]
 - GPU: <是否可用，型号，显存> [必须引用预览工具输出]
 
 ## 7. 训练建议
 - 推荐模型: <引用预览工具输出的模型列表及配置>
-- n_jobs 建议: <必须引用预览工具计算的推荐值，禁止自行设定为 -1>
+- n_jobs 建议: <引用 `recommended_n_jobs` 字段值（非 `cpu_count`），禁止自行计算>
 - GPU 建议: <引用预览工具的 GPU 检测结果决定是否启用>
 - 验证集划分: <引用预览工具的策略建议（k-fold/time-based/holdout）、fold 数、是否 Stratified>
 
