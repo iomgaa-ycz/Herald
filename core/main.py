@@ -220,6 +220,7 @@ def main() -> None:
             ("feature_extract", 1),
             ("draft", config.run.max_tasks),
         ],
+        stage_max_retries={"feature_extract": 2},
     )
     logger.info("调度器已启动: task_stages=%s", scheduler._resolve_task_stages())
     try:

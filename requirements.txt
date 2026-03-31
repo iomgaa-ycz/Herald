@@ -14,3 +14,6 @@ pyee>=12.0.0
 
 # Config
 PyYAML>=6.0.2
+
+# LLM Output Parsing
+json-repair>=0.58.0

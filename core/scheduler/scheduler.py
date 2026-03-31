@@ -26,6 +26,7 @@ class Scheduler:
         agent_name: str = "kaggle_master",
         context: dict[str, Any] | None = None,
         task_stages: list[tuple[str, int]] | None = None,
+        stage_max_retries: dict[str, int] | None = None,
     ) -> None:
         """初始化调度器。
 
@@ -36,6 +37,7 @@ class Scheduler:
             agent_name: Agent 名称（默认 kaggle_master）
             context: 额外上下文信息
             task_stages: 多阶段任务定义，格式为 [(task_name, count), ...]
+            stage_max_retries: 各 stage 最大重试次数，如 {"feature_extract": 2}
         """
         self.competition_dir = competition_dir
         self.max_tasks = max_tasks
@@ -43,12 +45,14 @@ class Scheduler:
         self.agent_name = agent_name
         self.context = context or {}
         self.task_stages = task_stages
+        self._stage_max_retries = stage_max_retries or {}
 
         self._completed_count = 0
         self._total_tasks = 0
         self._current_task_event: asyncio.Event | None = None
         self._current_stage_name: str | None = None
         self._current_stage_outputs: list[dict[str, Any]] = []
+        self._last_task_status: str | None = None
         self.shared_context: dict[str, Any] = {}
 
     def run(self) -> None:
@@ -93,7 +97,7 @@ class Scheduler:
         count: int,
         start_generation: int,
     ) -> int:
-        """串行执行单个 stage。
+        """串行执行单个 stage，支持失败重试。
 
         Args:
             stage_name: 当前阶段任务名
@@ -106,15 +110,44 @@ class Scheduler:
 
         self._current_stage_name = stage_name
         self._current_stage_outputs = []
-        logger.info("开始执行 stage: task=%s, count=%d", stage_name, count)
+        max_retries = self._stage_max_retries.get(stage_name, 0)
+        logger.info(
+            "开始执行 stage: task=%s, count=%d, max_retries=%d",
+            stage_name,
+            count,
+            max_retries,
+        )
 
         generation = start_generation
-        for _ in range(count):
-            self._dispatch_task(index=generation, task_name=stage_name)
-            # 等待当前任务完成（使用 yield 确保事件循环有机会处理其他任务）
-            await self._wait_current_task()
-            self._completed_count += 1
-            logger.info("任务完成: %d/%d", self._completed_count, self._total_tasks)
+        for task_idx in range(count):
+            for attempt in range(1 + max_retries):
+                self._last_task_status = None
+                self._dispatch_task(index=generation, task_name=stage_name)
+                await self._wait_current_task()
+                self._completed_count += 1
+                logger.info("任务完成: %d/%d", self._completed_count, self._total_tasks)
+
+                if self._last_task_status == "completed":
+                    break
+
+                # 任务失败，判断是否重试
+                if attempt < max_retries:
+                    logger.warning(
+                        "stage '%s' 任务 %d 失败（attempt %d/%d），准备重试",
+                        stage_name,
+                        task_idx,
+                        attempt + 1,
+                        1 + max_retries,
+                    )
+                    generation += 1
+                else:
+                    logger.error(
+                        "stage '%s' 任务 %d 在 %d 次尝试后仍失败",
+                        stage_name,
+                        task_idx,
+                        1 + max_retries,
+                    )
+
             generation += 1
 
         self._merge_stage_outputs()
@@ -185,6 +218,8 @@ class Scheduler:
                 event.task_name,
             )
             return
+
+        self._last_task_status = event.status
 
         if event.status == "completed" and event.output_context:
             self._current_stage_outputs.append(dict(event.output_context))

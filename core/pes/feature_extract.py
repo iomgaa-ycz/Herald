@@ -172,6 +172,8 @@ class FeatureExtractPES(BasePES):
     def _parse_structured_output(self, text: str) -> dict[str, Any]:
         """从 LLM 输出中提取最后一个 JSON code block 并解析。
 
+        两层防御：L1 标准 json.loads → L2 json_repair fallback。
+
         Args:
             text: LLM 原始输出文本
 
@@ -188,10 +190,27 @@ class FeatureExtractPES(BasePES):
 
         # 取最后一个 JSON block
         json_text = matches[-1].strip()
+
+        # L1: 标准解析
         try:
             parsed = json.loads(json_text)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"JSON 解析失败: {error}") from error
+        except json.JSONDecodeError as first_error:
+            # L2: json_repair fallback
+            logger.warning("JSON 标准解析失败，尝试修复: %s", first_error)
+            try:
+                from json_repair import repair_json
+
+                repaired = repair_json(json_text, return_objects=True)
+            except Exception as repair_error:
+                raise ValueError(
+                    f"JSON 解析失败且修复无效: 原始={first_error}"
+                ) from repair_error
+            if not isinstance(repaired, dict):
+                raise ValueError(
+                    f"修复后 JSON 非对象: {type(repaired).__name__}"
+                ) from first_error
+            parsed = repaired
+            logger.info("JSON 修复成功")
 
         if not isinstance(parsed, dict):
             raise ValueError(f"JSON 顶层必须是对象，实际类型: {type(parsed).__name__}")
