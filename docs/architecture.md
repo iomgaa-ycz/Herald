@@ -162,23 +162,21 @@ Herald2 是研究项目，最怕“代码已经变了，但系统理解没变”
 
 ---
 
-## 5. 当前代码的真实架构（2026-03-28）
+## 5. 当前代码的真实架构（2026-03-31）
 
-当前仓库已经实现的，不是完整进化系统，而是一个**单进程、单任务类型、串行驱动的 DraftPES MVP 闭环**。
+当前仓库已完成第一阶段（M0~M0.5）的全部 17 个任务，实现了**单进程、串行驱动的 FeatureExtractPES + DraftPES 双 PES 流水线闭环**。
 
-### 5.1 目标主链路
-
-> **图例**: ✅ 已实现 · ⬜ 待实现 · 🔄 需修改
+### 5.1 已实现主链路
 
 ```text
 core/main.py
   │
   ├── ✅ ConfigManager.parse()
-  ├── ✅ Workspace.create()
+  ├── ✅ Workspace.create() + expose_project_skills()
   ├── ✅ HeraldDB(...)
   ├── ✅ EventBus.get()
   ├── ✅ setup_task_dispatcher()
-  ├── ⬜ bootstrap_feature_extract_pes(...)        # [NEW] 前置数据分析 PES
+  ├── ✅ bootstrap_feature_extract_pes(...)
   │      ├── load_pes_config("config/pes/feature_extract.yaml")
   │      ├── LLMClient(...)
   │      └── FeatureExtractPES(...)
@@ -187,16 +185,16 @@ core/main.py
   │      ├── LLMClient(...)
   │      └── DraftPES(...)
   │
-  └── 🔄 Scheduler(task_stages=[                   # [MODIFY] 支持多阶段流水线
+  └── ✅ Scheduler(task_stages=[
           ("feature_extract", 1),
           ("draft", max_tasks),
       ]).run()
           │
-          ├── ⬜ Stage 1: emit(TaskDispatchEvent(task_name="feature_extract"))
+          ├── ✅ Stage 1: emit(TaskDispatchEvent(task_name="feature_extract"))
           │     ▼
           │   TaskDispatcher → FeatureExtractPES.run()
           │     ├── plan:     分析竞赛描述，规划数据探索策略
-          │     ├── execute:  LLM Agent 用 Bash 工具读取数据文件
+          │     ├── execute:  LLM Agent 用 Bash/Skill 工具读取数据文件
           │     │             → 生成 TaskSpec + data_profile + 选择 genome_template
           │     └── summarize: 总结数据特征与建模建议
           │     ▼
@@ -207,8 +205,8 @@ core/main.py
                 ▼
               TaskDispatcher → DraftPES.run()
                 ├── plan:     消费 TaskSpec + data_profile + GenomeSchema 模板
-                ├── execute:  实现代码
-                └── summarize: 总结
+                ├── execute:  生成真实 solution.py + submission.csv + 提取 metrics
+                └── summarize: 总结 + 版本归档 + best 提升
 ```
 
 ### 5.2 FeatureExtractPES.run() 行为
@@ -241,25 +239,37 @@ DraftPES.run()
   ├── plan()                     -> 渲染 draft_plan Prompt，调 LLM，记录 llm_calls
   │      └── 消费 task_spec + data_profile + GenomeSchema 模板
   ├── execute_phase()            -> 渲染 draft_execute Prompt，调 LLM，记录 llm_calls
-  │      └── _attach_workspace_artifacts()
-  │             ├── 设置 workspace_dir / solution_file_path
-  │             └── 仅 touch 空的 solution.py / submission.csv
+  │      ├── _attach_workspace_artifacts()
+  │      ├── _assert_tool_write_contract()     -> 校验 solution.py 已写出
+  │      ├── _validate_python_code()           -> 语法检查
+  │      ├── _persist_code_snapshot()          -> 代码快照入库
+  │      ├── _extract_execute_fact()           -> 从 tool trace 提取首次运行事实
+  │      ├── _persist_exec_log()               -> exec_logs 入库
+  │      ├── _extract_val_metrics()            -> 提取 val_metric_value
+  │      ├── _apply_val_metrics()              -> 回写 fitness
+  │      └── _validate_submission_artifact()   -> 校验 submission.csv
   └── summarize()                -> 渲染 draft_summarize Prompt，调 LLM，记录 llm_calls
+         ├── _archive_completed_solution()     -> 版本归档
+         ├── _maybe_promote_best()             -> 最优时提升 best/
          └── emit(TaskCompleteEvent)
 ```
 
 ### 5.4 当前必须明确的事实
 
-- 当前阶段有两个生产级 PES：`FeatureExtractPES`（前置）和 `DraftPES`（主链路）
-- 现在只有一个 Agent profile：`kaggle_master`
-- `Scheduler` 是**串行**的，不是并行的
+- 两个生产级 PES：`FeatureExtractPES`（前置）和 `DraftPES`（主链路）
+- 一个 Agent profile：`kaggle_master`
+- `Scheduler` 是**串行**的，支持 `task_stages` 多阶段流水线
 - `EventBus` 是**进程内总线**，不是分布式消息系统
-- `AgentRegistry` 当前加载的是**prompt persona**，不是独立 Agent 进程
-- 当前实现还未接通 Draft execute 的正式代码契约；本架构基线要求后续一律以 tools 成功写出的 `working/solution.py` 作为代码真相来源，禁止输出解析兜底
+- Draft execute 已接通完整的 tool-write 契约：代码落盘、语法校验、首次运行事实、metrics 提取、submission 校验
+- `val_metric_value -> fitness` 闭环已打通
+- `test_score` 通过 `MLEBenchGradingHook` 在 `after_run` 补采
+- 版本归档（`save_version`）和 best 提升（`promote_best`）已接入
+- L2/L3 表已建，但**主链路尚未接入 L2 知识回流**
+- **多次 draft 之间没有信息传递**，每次 draft 独立运行、互不感知
 
-所以当前系统更准确的定义是：
+当前系统的定义是：
 
-**Herald2 目前是“以 DraftPES 为核心的可观测 Harness 原型”，还不是完整的进化式竞赛系统。**
+**Herald2 已完成单 Draft 闭环的全部 Harness 能力，正在进入”多次 Draft + L2 知识回流 + 差异化生成”阶段。**
 
 ---
 
@@ -439,85 +449,63 @@ task_stages = [
 
 ### 8.4 Harness 层
 
-当前真正的 Harness 由两部分构成：
+当前 Harness 由两部分构成：
 
-- `Workspace`
-- `HeraldDB`
+- `Workspace`：工件落盘、版本归档、best 提升、project skill 暴露
+- `HeraldDB`：solutions、llm_calls、exec_logs、code_snapshots、contract_checks、grading_results 已全部接入主流程
 
-它们的设计方向是对的，但接线还没完：
-
-- `Workspace.save_version()` / `promote_best()` 还未接入 `DraftPES`
-- `exec_logs` / `code_snapshots` / `genes` 还未在主流程产出
+L2/L3 表已建，`L2Repository` 已实现 `upsert_insight` / `get_insights`，但主流程尚未接入。
 
 ---
 
 ## 9. 当前缺口与真正的下一步
 
-为了避免开发歪掉，这里要明确：**接下来最该做的，不是“再加一个更大的架构层”，而是把当前闭环补实。**
+### 9.1 ✅ P0：单 Draft 闭环（已完成）
 
-### 9.1 P0：FeatureExtractPES + 任务规格动态生成
+第一阶段（M0~M0.5）的全部 17 个任务已完成：
 
-当前 prompt 模板已经支持 `task_spec`、`schema`、`workspace`、`recent_error`、`template_content`，但生产 bootstrap 只注入了 `competition_dir`。
+- FeatureExtractPES 动态生成 TaskSpec + data_profile + GenomeSchema 选择
+- Scheduler 支持 task_stages 多阶段流水线
+- DraftPES 完整 tool-write 契约、代码落盘、首次运行事实、metrics 提取
+- submission 校验、版本归档、best 提升
+- MLEBenchGradingHook 补采 test_score
+- run 级元数据与人类可读日志
+- project skill 暴露到 workspace
 
-`TaskSpec` 不再由 bootstrap 静态构造，而是由 `FeatureExtractPES` 动态生成。因此必须补：
+### 9.2 P0.7：多次 Draft + L2 知识回流 + 差异化生成（当前阶段）
 
-- 实现 `FeatureExtractPES`（plan/execute/summarize 三阶段）
-- execute 阶段：LLM Agent 用工具分析数据文件，生成 TaskSpec + data_profile + 选择 GenomeSchema 模板
-- 实现 GenomeSchema 模板加载（tabular.py / generic.py）
-- Scheduler 支持 `task_stages` 多阶段流水线
-- `FeatureExtractPES` 产出注入 `DraftPES.runtime_context`
-- DraftPES prompt 模板消费 `data_profile`
+第一阶段的系统有一个核心缺口：**多次 draft 之间没有信息传递，每次 draft 都是”从零开始”**。
 
-### 9.2 P0：把 execute 输出沉淀成真实代码
+即使 Scheduler 支持 `draft` stage 运行 N 次，第 10 次 draft 和第 1 次 draft 看到的上下文完全相同——系统没有记忆，无法避免重复探索。
 
-当前 `execute` 阶段只做了两件事：
+本阶段必须补：
 
-- 保存文本摘要
-- `touch()` 一个空文件
+1. **Draft Summarize 固定格式** — 让总结输出结构化、可解析、可被后续 draft 消费
+2. **L2 知识写入** — Summarize 完成后将方案级经验写入 `l2_insights`
+3. **CLI 查询扩展** — 新增 `list-drafts`、`get-draft-detail`、`get-l2-insights` 命令
+4. **Draft 历史感知 Skill** — 指导 Agent 在 plan 阶段通过 Bash 调 CLI 查询历史
+5. **差异化约束** — prompt 中明确要求”先查历史，不重复已有策略”
+6. **plan 阶段工具开放** — 让 Agent 在 plan 阶段能调 Bash 查询 DB
 
-必须尽快补成：
+关键设计决策：
+- **Draft 没有 parent**：Draft 的语义是”独立探索新方向”，不是 Mutate。它需要知道其他 draft 做了什么（简报级），但不继承代码
+- **Skill 调 CLI 查询**：Agent 已有 Bash 工具，按需查询不膨胀 prompt
+- **方案级 L2**：MVP 阶段先粗后细，不做 slot 级拆分
 
-1. 建立 execute 阶段的 `tool-write` 契约
-2. 严格校验 `working/solution.py` 已被 tools 写出且非空
-3. 保存 `code_snapshots`
-4. 记录 execute 阶段首次真实运行的执行事实
-5. 保存 `exec_logs`
-6. 解析 metrics / submission 路径
+### 9.3 P1：从多 Draft 进入单谱系进化
 
-这里的“记录执行事实”优先复用 Agent 在 execute phase 中对最终 `solution.py` 的真实运行结果，而不是默认由 Harness 再次完整重跑同一份竞赛脚本。
+在 P0.7 完成后：
 
-### 9.3 P0：让 Workspace 与 DB 真正闭环
+1. 单 `Mutate` 闭环（Mutate 才有 parent，继承代码做局部修改）
+2. 父子 `Solution` 与 slot 级 history 真正接入
+3. 再讨论选择压力、Boltzmann、population summary
 
-当前 `Workspace` 里已经有：
+### 9.4 P2：补全完整研究系统能力
 
-- `history/`
-- `best/`
-- `save_version()`
-- `promote_best()`
-
-这意味着架构已经准备好了，只差最后接线：
-
-- execute 成功后保存版本
-- fitness 更优时 promote best
-- 把产物路径更新回 `solutions`
-
-### 9.4 P1：从单 Draft 进入单谱系进化
-
-在 P0 完成前，不应直接做并行。
-
-正确顺序应是：
-
-1. 单 `Draft` 闭环补实
-2. 单 `Mutate` 闭环
-3. 父子 `Solution` 与 slot 级 history 真正接入
-4. 再讨论选择压力、Boltzmann、population summary
-
-### 9.5 P2：补全完整研究系统能力
-
-只有当 P0/P1 稳定后，才值得做：
+只有当 P0.7/P1 稳定后，才值得做：
 
 - Merge
-- L2/L3 真正回流到 Plan
+- L3 跨任务规律
 - compatibility rules
 - 多样性维持
 - 多岛 / 并行
@@ -527,32 +515,33 @@ task_stages = [
 
 ## 10. 推荐演进路线
 
-| 阶段 | 目标 | 关键交付 |
-|---|---|---|
-| M0-now | 单 `DraftPES` 调用链打通 | 已完成 |
-| M0.3 | FeatureExtractPES + GenomeSchema 模板 | `FeatureExtractPES` 数据分析与 TaskSpec 生成、`task_stages` 调度、tabular/generic 模板、DraftPES 消费 data_profile |
-| M0.5 | 真实代码落盘、首次执行与事实记录 | `tool-write` 契约、`solution.py` 写入、execute 首次运行事实、metrics、submission、`exec_logs` |
-| M1 | 单谱系进化 | `MutatePES`、parent/child、genes/snapshots 真接入 |
-| M2 | 完整方案级搜索骨架 | `MergePES`、L2/L3 回流、schema 驱动搜索 |
-| M3 | 并行与编排 | 多任务调度、预算管理、并行执行 |
-| M4 | 研究级评测 | MLE-bench 全量实验与 ablation |
+| 阶段 | 目标 | 关键交付 | 状态 |
+|---|---|---|---|
+| M0 | 单 `DraftPES` 调用链打通 | BasePES + DraftPES 三阶段 | ✅ 完成 |
+| M0.3 | FeatureExtractPES + GenomeSchema 模板 | FeatureExtractPES、task_stages 调度、tabular/generic 模板 | ✅ 完成 |
+| M0.5 | 真实代码落盘、首次执行与事实记录 | tool-write 契约、solution.py、metrics、submission、exec_logs | ✅ 完成 |
+| **M0.7** | **多次 Draft + L2 知识回流 + 差异化生成** | **Summarize 固定格式、L2 写入、CLI 查询、draft-history-review Skill、差异化约束** | **← 当前** |
+| M1 | 单谱系进化 | MutatePES、parent/child、genes/snapshots 真接入 | 待开始 |
+| M2 | 完整方案级搜索骨架 | MergePES、L3 回流、schema 驱动搜索 | 待开始 |
+| M3 | 并行与编排 | 多任务调度、预算管理、并行执行 | 待开始 |
+| M4 | 研究级评测 | MLE-bench 全量实验与 ablation | 待开始 |
 
-这里最关键的路线约束是：
+当前路线约束：
 
-**不要在 M0.5 之前实现“看起来像高级智能”的功能。**
+**M0.7 的核心是”让系统有记忆”，而不是”让系统更聪明”。**
 
 因为：
 
-- 没有真实执行事实，就没有真实反馈
-- 没有真实反馈，就没有 fitness
-- 没有 fitness，就没有真正的进化
+- 没有跨 draft 记忆，10 次 draft 等于 10 次独立随机尝试
+- 有了 L2 知识回流，每次 draft 才能避免重复、逐步覆盖更大的策略空间
+- 差异化生成是扩大样本池的前提，而不是优化单个方案的手段
 
 ---
 
 ## 11. 一句话架构结论
 
-Herald2 的正确方向不是“把更多 Agent 堆起来”，而是：
+Herald2 的正确方向不是”把更多 Agent 堆起来”，而是：
 
 **以 `TaskSpec / GenomeSchema` 定义搜索空间，以 `BasePES` 定义研究循环，以 `Workspace + HeraldDB` 定义可追踪 Harness，再在这个稳定底座上逐步长出 `Draft -> Mutate -> Merge -> Population -> Orchestrator`。**
 
-当前代码已经把这个方向的骨架搭出来了，系统正从**单 `DraftPES` Harness MVP** 阶段推进到 **`FeatureExtractPES + DraftPES` 双 PES 流水线** 阶段；接下来最重要的是实现 FeatureExtractPES 动态生成 TaskSpec、GenomeSchema 模板体系，以及把 execute 产物、执行验证和知识回流真正接上。
+当前系统已完成单 Draft 闭环的全部 Harness 能力（M0~M0.5），正在进入**多次 Draft + L2 知识回流 + 差异化生成**阶段（M0.7）。下一步最重要的是让系统”有记忆”——通过 Summarize 固定格式、L2 知识写入、CLI 查询和 draft-history-review Skill，使每次 Draft 能感知前序 Draft 的策略与结果，避免重复探索，真正扩大样本池。
