@@ -38,6 +38,7 @@ def _load_llm_module() -> types.ModuleType:
     sdk_stub.TextBlock = object
     sdk_stub.ToolResultBlock = object
     sdk_stub.ToolUseBlock = object
+    sdk_stub.UserMessage = object
     sdk_stub.query = _query_stub
     sys.modules["claude_agent_sdk"] = sdk_stub
 
@@ -111,3 +112,36 @@ def test_feature_extract_yaml_enables_skill_tool() -> None:
 
     assert config.get_phase("execute").allowed_tools is not None
     assert "Skill" in config.get_phase("execute").allowed_tools
+
+
+def test_draft_summarize_yaml_enables_skill_tool() -> None:
+    """Draft summarize phase 显式开启 Skill。"""
+
+    config = load_pes_config("config/pes/draft.yaml")
+
+    phase = config.get_phase("summarize")
+    assert phase.allowed_tools is not None
+    assert "Skill" in phase.allowed_tools
+    assert phase.max_turns >= 2
+
+
+def test_draft_summarize_format_skill_exists() -> None:
+    """draft-summarize-format Skill 文件存在且可被 project skill 机制发现。"""
+
+    skill_path = (
+        Path(__file__).resolve().parents[2]
+        / "core"
+        / "prompts"
+        / "skills"
+        / "draft-summarize-format"
+        / "SKILL.md"
+    )
+    assert skill_path.exists(), f"Skill 文件不存在: {skill_path}"
+
+    content = skill_path.read_text(encoding="utf-8")
+    assert "name: draft-summarize-format" in content
+    assert "# 摘要" in content
+    assert "# 策略选择" in content
+    assert "# 执行结果" in content
+    assert "# 关键发现" in content
+    assert "# 建议方向" in content
