@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -122,10 +123,8 @@ class SolutionRepository(BaseRepository):
     def get(self, solution_id: str) -> dict | None:
         row = self._fetchone("SELECT * FROM solutions WHERE id = ?", (solution_id,))
         if row and row.get("parent_ids"):
-            try:
+            with contextlib.suppress(Exception):
                 row["parent_ids"] = json.loads(row["parent_ids"])
-            except Exception:
-                pass
         return row
 
     def get_by_generation(self, generation: int) -> list[dict]:
@@ -135,10 +134,8 @@ class SolutionRepository(BaseRepository):
         )
         for row in rows:
             if row.get("parent_ids"):
-                try:
+                with contextlib.suppress(Exception):
                     row["parent_ids"] = json.loads(row["parent_ids"])
-                except Exception:
-                    pass
         return rows
 
     def get_best_fitness(
@@ -183,11 +180,45 @@ class SolutionRepository(BaseRepository):
         )
         for row in rows:
             if row.get("parent_ids"):
-                try:
+                with contextlib.suppress(Exception):
                     row["parent_ids"] = json.loads(row["parent_ids"])
-                except Exception:
-                    pass
         return rows
+
+    def list_by_run_and_operation(
+        self,
+        run_id: str,
+        operation: str,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """查询指定 run 下某操作类型的 solution 列表。
+
+        Args:
+            run_id: 运行 ID
+            operation: 操作类型（如 "draft"）
+            status: 状态过滤，None 表示不过滤
+            limit: 最大返回条数
+
+        Returns:
+            solution 摘要列表
+        """
+        conditions = ["run_id = ?", "operation = ?"]
+        params: list[Any] = [run_id, operation]
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        params.append(limit)
+        return self._fetchall(
+            f"""
+            SELECT id, generation, status, fitness, metric_name,
+                   metric_value, summarize_insight
+            FROM solutions
+            WHERE {" AND ".join(conditions)}
+            ORDER BY generation ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
 
     def delete(self, solution_id: str) -> None:
         self._execute("DELETE FROM solutions WHERE id = ?", (solution_id,))

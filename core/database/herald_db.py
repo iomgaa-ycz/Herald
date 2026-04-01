@@ -200,6 +200,22 @@ class HeraldDB:
 
         return self.grading.get_latest_by_solution(solution_id)
 
+    def list_solutions_by_run_and_operation(
+        self,
+        run_id: str,
+        operation: str,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """查询指定 run 下某操作类型的 solution 列表。"""
+
+        return self.solutions.list_by_run_and_operation(
+            run_id=run_id,
+            operation=operation,
+            status=status,
+            limit=limit,
+        )
+
     def get_lineage_chain(self, solution_id: str) -> list[dict]:
         return self.lineage.get_lineage_chain(solution_id)
 
