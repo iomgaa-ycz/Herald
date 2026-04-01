@@ -112,6 +112,9 @@ def test_prompt_manager_can_render_all_draft_templates() -> None:
     assert "训练集 100 行" in manager.build_prompt("draft", "plan", context)
     assert "训练集 100 行" in manager.build_prompt("draft", "execute", context)
 
+    summarize_prompt = manager.build_prompt("draft", "summarize", context)
+    assert "draft-summarize-format" in summarize_prompt
+
 
 def test_system_context_has_no_overengineering_rule() -> None:
     """system_context 不含与金牌目标冲突的规则。"""

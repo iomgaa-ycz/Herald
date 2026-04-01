@@ -368,8 +368,11 @@ def test_load_draft_yaml_config() -> None:
         "Edit",
         "Glob",
         "Grep",
+        "Skill",
     ]
     assert config.get_phase("execute").max_turns == 12
+    assert config.get_phase("summarize").allowed_tools == ["Skill"]
+    assert config.get_phase("summarize").max_turns == 2
 
 
 def test_base_pes_execute_phase_passes_cwd_and_env() -> None:
