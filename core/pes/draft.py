@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 from pathlib import Path
@@ -11,7 +12,10 @@ from typing import Any
 from core.pes.base import BasePES
 from core.pes.submission import validate_submission_against_sample
 from core.pes.types import PESSolution
+from core.utils.text import extract_summary_excerpt
 from core.utils.utils import utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 _BACKGROUND_TASK_PREFIX = "Command running in background with ID:"
 
@@ -69,6 +73,7 @@ class DraftPES(BasePES):
             solution.status = "completed"
             solution.finished_at = utc_now_iso()
             self._archive_completed_solution(solution)
+            self._write_l2_knowledge(solution)
             self._emit_task_complete_event(solution=solution, status="completed")
         else:
             raise ValueError(f"不支持的 DraftPES phase: {phase}")
@@ -99,11 +104,40 @@ class DraftPES(BasePES):
         exit_code = exec_result["exit_code"]
         if exit_code != 0:
             solution.execute_summary = self._format_execute_summary(exec_result)
+            solution.metadata["_l2_failure_context"] = {
+                "reason": "runtime_error",
+                "stderr_tail": (
+                    self._coerce_optional_text(exec_result.get("stderr")) or ""
+                )[-500:],
+                "stdout_tail": (
+                    self._coerce_optional_text(exec_result.get("stdout")) or ""
+                )[-500:],
+            }
             raise ValueError(f"solution.py 首次运行失败：{solution.execute_summary}")
 
-        metrics = self._extract_val_metrics(solution=solution, exec_result=exec_result)
+        try:
+            metrics = self._extract_val_metrics(
+                solution=solution, exec_result=exec_result
+            )
+        except ValueError:
+            solution.metadata["_l2_failure_context"] = {
+                "reason": "missing_metric",
+                "stdout_tail": (
+                    self._coerce_optional_text(exec_result.get("stdout")) or ""
+                )[-500:],
+            }
+            raise
         self._apply_val_metrics(solution=solution, metrics=metrics)
-        validation = self._validate_submission_artifact(solution)
+        try:
+            validation = self._validate_submission_artifact(solution)
+        except ValueError:
+            solution.metadata["_l2_failure_context"] = {
+                "reason": "submission_invalid",
+                "errors": list(
+                    solution.metadata.get("submission_validation_errors", [])
+                ),
+            }
+            raise
         self._apply_submission_validation(solution=solution, result=validation)
         solution.execute_summary = self._format_execute_summary(
             exec_result=exec_result,
@@ -1015,3 +1049,102 @@ class DraftPES(BasePES):
             "version_dir": str(version_dir),
             "promoted_at": utc_now_iso(),
         }
+
+    # ── L2 知识写入 ──────────────────────────────────────────────
+
+    def _get_task_type(self) -> str:
+        """从 execution_context / runtime_context 的 task_spec 中提取 task_type。"""
+
+        task_spec = self._execution_context.get(
+            "task_spec",
+            self.runtime_context.get("task_spec"),
+        )
+        if isinstance(task_spec, dict):
+            task_type = task_spec.get("task_type")
+            if task_type not in (None, ""):
+                return str(task_type).strip()
+        return "unknown"
+
+    def _write_l2_knowledge(self, solution: PESSolution) -> None:
+        """将方案级经验写入 L2 知识层。
+
+        成功路径：从 summarize_insight 提取摘要作为 pattern，evidence_type="support"。
+        失败路径：从 metadata["_l2_failure_context"] 组装 insight，evidence_type="contradict"。
+        写入失败仅 warn，不阻塞主链路。
+        """
+
+        if self.db is None or not hasattr(self.db, "upsert_l2_insight"):
+            return
+
+        try:
+            task_type = self._get_task_type()
+            failure_ctx = solution.metadata.get("_l2_failure_context")
+
+            if failure_ctx is not None:
+                # 失败路径
+                evidence_type = "contradict"
+                insight = self._build_failure_insight(solution, failure_ctx)
+                pattern = insight[:300]
+            else:
+                # 成功路径
+                evidence_type = "support"
+                insight = solution.summarize_insight or ""
+                pattern = extract_summary_excerpt(insight, max_len=300)
+
+            if not pattern.strip():
+                logger.warning(
+                    "L2 写入跳过：pattern 为空 [solution_id=%s]", solution.id
+                )
+                return
+
+            self.db.upsert_l2_insight(
+                slot="strategy",
+                task_type=task_type,
+                pattern=pattern,
+                insight=insight,
+                solution_id=solution.id,
+                evidence_type=evidence_type,
+            )
+        except Exception:
+            logger.warning(
+                "L2 知识写入失败，不阻塞主链路 [solution_id=%s]",
+                solution.id,
+                exc_info=True,
+            )
+
+    def _build_failure_insight(
+        self,
+        solution: PESSolution,
+        failure_ctx: dict[str, Any],
+    ) -> str:
+        """从失败上下文组装 L2 insight 文本。"""
+
+        reason = failure_ctx.get("reason", "unknown")
+        parts = [f"[FAILED:{reason}] {solution.execute_summary}"]
+
+        stderr_tail = failure_ctx.get("stderr_tail")
+        if stderr_tail:
+            parts.append(f"stderr: {stderr_tail}")
+
+        stdout_tail = failure_ctx.get("stdout_tail")
+        if stdout_tail:
+            parts.append(f"stdout_tail: {stdout_tail}")
+
+        errors = failure_ctx.get("errors")
+        if errors:
+            parts.append(f"errors: {'; '.join(str(e) for e in errors)}")
+
+        return "\n".join(parts)
+
+    def handle_phase_failure(
+        self,
+        phase: str,
+        solution: PESSolution,
+        error: Exception,
+    ) -> None:
+        """Override：在基类失败处理后，对有价值的失败写入 L2 contradict。"""
+
+        super().handle_phase_failure(phase=phase, solution=solution, error=error)
+
+        if solution.metadata.get("_l2_failure_context") is not None:
+            self._write_l2_knowledge(solution)

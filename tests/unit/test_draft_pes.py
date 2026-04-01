@@ -6,7 +6,10 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from core.agent.profile import AgentProfile
+from core.database.herald_db import HeraldDB
 from core.events.bus import EventBus
 from core.pes.base import BasePES
 from core.pes.config import PESConfig, PhaseConfig, load_pes_config
@@ -493,3 +496,219 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
     assert "训练集 100 行" in str(llm.calls[1]["prompt"])
     assert llm.calls[1]["cwd"] == str(workspace.working_dir)
     assert llm.calls[1]["env"] == {"HERALD_DB_PATH": str(workspace.db_path)}
+
+
+# ── L2 知识写入测试 ──────────────────────────────────────────
+
+
+SUMMARIZE_INSIGHT_SAMPLE = """\
+# 摘要
+采用 LightGBM 模型进行二分类，AUC 达到 0.91。特征交叉是主要提升手段。
+
+# 策略选择
+使用 LightGBM + 5 折交叉验证。
+
+# 执行结果
+AUC=0.91，耗时 10ms。
+
+# 关键发现
+特征交叉对 AUC 提升约 0.02。
+
+# 建议方向
+下次尝试 XGBoost。
+"""
+
+
+def _build_pes_with_db(
+    tmp_path: Path,
+    *,
+    summarize_response: str = SUMMARIZE_INSIGHT_SAMPLE,
+) -> tuple[DraftPES, DummyWorkspace, HeraldDB]:
+    """构造带真实 DB 的 DraftPES，用于 L2 写入测试。"""
+
+    workspace = _build_workspace(tmp_path)
+    db = HeraldDB(str(workspace.db_path))
+    llm = DummyLLM(
+        responses=["plan ok", "execute ok", summarize_response],
+        execute_code=(
+            "def solve() -> None:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            'if __name__ == "__main__":\n'
+            "    solve()\n"
+        ),
+    )
+    pes = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=llm,
+        db=db,
+        workspace=workspace,
+        runtime_context=_build_runtime_context(str(workspace.root)),
+        prompt_manager=_build_prompt_manager(),
+    )
+    return pes, workspace, db
+
+
+def test_write_l2_success_case(tmp_path: Path) -> None:
+    """summarize 完成后 l2_insights 有条目，evidence_type='support'。"""
+
+    pes, workspace, db = _build_pes_with_db(tmp_path)
+
+    solution = asyncio.run(
+        pes.run(
+            agent_profile=AgentProfile(
+                name="draft-agent",
+                display_name="Draft Agent",
+                prompt_text="",
+            ),
+            generation=0,
+        )
+    )
+
+    assert solution.status == "completed"
+
+    # 验证 l2_insights 表有记录
+    insights = db.get_l2_insights(slot="strategy")
+    assert len(insights) >= 1
+
+    insight = insights[0]
+    assert insight["slot"] == "strategy"
+    assert insight["task_type"] == "tabular_ml"
+    assert "LightGBM" in insight["pattern"]
+    assert insight["status"] == "active"
+
+    # 验证 l2_evidence 表有记录
+    evidence = db.get_l2_evidence(insight["id"])
+    assert len(evidence) >= 1
+    assert evidence[0]["evidence_type"] == "support"
+    assert evidence[0]["solution_id"] == solution.id
+
+    db.close()
+
+
+def test_write_l2_failure_contradict(tmp_path: Path) -> None:
+    """运行失败时 l2_evidence 中 evidence_type='contradict'。"""
+
+    workspace = _build_workspace(tmp_path)
+    db = HeraldDB(str(workspace.db_path))
+
+    # 构造一个 execute 阶段运行失败的 DummyLLM（exit_code=1）
+    llm = DummyLLM(responses=["plan ok", "execute ok", "summarize ok"])
+    # 手动写一个 solution.py，但让 tool trace 返回 exit_code=1
+    pes = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=llm,
+        db=db,
+        workspace=workspace,
+        runtime_context=_build_runtime_context(str(workspace.root)),
+        prompt_manager=_build_prompt_manager(),
+    )
+
+    # 手动模拟失败路径
+    solution = pes.create_solution(generation=0)
+    solution.execute_summary = "solution.py 首次运行失败"
+    solution.metadata["_l2_failure_context"] = {
+        "reason": "runtime_error",
+        "stderr_tail": "Traceback: ZeroDivisionError",
+        "stdout_tail": "training started...",
+    }
+    solution.status = "failed"
+
+    # 直接调用 _write_l2_knowledge
+    pes._write_l2_knowledge(solution)
+
+    insights = db.get_l2_insights(slot="strategy")
+    assert len(insights) >= 1
+
+    insight = insights[0]
+    assert "FAILED" in insight["pattern"]
+    assert "runtime_error" in insight["pattern"]
+
+    evidence = db.get_l2_evidence(insight["id"])
+    assert len(evidence) >= 1
+    assert evidence[0]["evidence_type"] == "contradict"
+    assert evidence[0]["solution_id"] == solution.id
+
+    db.close()
+
+
+def test_write_l2_db_error_no_block(tmp_path: Path) -> None:
+    """L2 写入异常不影响 solution 状态和事件。"""
+
+    class BrokenDB:
+        """upsert_l2_insight 总是抛异常的 DB 桩。"""
+
+        def upsert_l2_insight(self, **kwargs: object) -> int:
+            raise RuntimeError("DB 写入失败")
+
+    workspace = _build_workspace(tmp_path)
+    llm = DummyLLM(
+        responses=["plan ok", "execute ok", SUMMARIZE_INSIGHT_SAMPLE],
+        execute_code=(
+            "def solve() -> None:\n"
+            "    pass\n"
+            "\n"
+            "\n"
+            'if __name__ == "__main__":\n'
+            "    solve()\n"
+        ),
+    )
+    pes = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=llm,
+        db=BrokenDB(),
+        workspace=workspace,
+        runtime_context=_build_runtime_context(str(workspace.root)),
+        prompt_manager=_build_prompt_manager(),
+    )
+
+    # 应该正常完成，不因 L2 写入失败而崩溃
+    solution = asyncio.run(
+        pes.run(
+            agent_profile=AgentProfile(
+                name="draft-agent",
+                display_name="Draft Agent",
+                prompt_text="",
+            ),
+            generation=0,
+        )
+    )
+
+    assert solution.status == "completed"
+
+
+def test_no_l2_for_missing_solution_file(tmp_path: Path) -> None:
+    """场景 1（solution.py 未写出）不写 L2。"""
+
+    workspace = _build_workspace(tmp_path)
+    db = HeraldDB(str(workspace.db_path))
+
+    # DummyLLM 不写 solution.py（没有 execute_code）
+    llm = DummyLLM(responses=["plan ok", "execute ok", "summarize ok"])
+    pes = DraftPES(
+        config=load_pes_config("config/pes/draft.yaml"),
+        llm=llm,
+        db=db,
+        workspace=workspace,
+        runtime_context=_build_runtime_context(str(workspace.root)),
+        prompt_manager=_build_prompt_manager(),
+    )
+
+    with pytest.raises(ValueError, match="未写出代码文件"):
+        asyncio.run(
+            pes.run(
+                agent_profile=AgentProfile(
+                    name="draft-agent",
+                    display_name="Draft Agent",
+                    prompt_text="",
+                ),
+                generation=0,
+            )
+        )
+
+    # 验证 l2_insights 表无记录
+    insights = db.get_l2_insights(slot="strategy")
+    assert len(insights) == 0
+
+    db.close()
