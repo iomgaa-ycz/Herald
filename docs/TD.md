@@ -191,25 +191,18 @@ Skill 中提供具体的 CLI 调用示例，降低 Agent 学习成本。`get-l2-
 ### 4.5 draft_plan.j2 差异化约束
 
 **文件**: `config/prompts/templates/draft_plan.j2`
-**变更类型**: MODIFY — 新增差异化约束段落
+**变更类型**: MODIFY — "方案约束"小节末尾新增一行 Skill 引导
 
-在现有"任务要求"之前新增：
+实际实现（与原始设计有偏差，见 §5.5）：
 
-```jinja2
-{% if generation > 0 %}
-# 差异化要求
-
-本次 draft 是独立探索，不是对某个已有方案的改进。
-你必须先通过 Bash 调用 `python core/cli/db.py get-l2-insights --task-type {{ task_spec.task_type }} --run-id {{ run_id }} --db-path {{ db_path }}` 查询前序 draft 经验。
-如果已有方案，你必须选择一个明确不同的方向（不同模型、不同特征工程策略、不同验证策略等）。
-不允许重复已有方案的核心策略。
-{% endif %}
+```text
+- 规划前请先使用 `draft-history-review` skill 查询前序 draft 经验，基于查询结果规划差异化方向，避免重复已有方案的核心策略
 ```
 
 关键设计：
-- `generation > 0` 条件判断：第一次 draft 无需查询历史
-- 唯一查询入口是 `get-l2-insights`（L2 = draft summarize 的索引）
-- 差异化是"要求"不是"建议"，prompt 中使用"必须"
+- **无条件渲染**（去掉 `generation > 0` 分支）：首次 draft 查询返回空，Agent 自然知道无历史，Skill 中已有空结果处理说明
+- **引导 Skill 而非硬编码 CLI**：与 `feature_extract_execute.j2`、`draft_summarize.j2` 既有模式一致——模板只引导 Agent 去使用 Skill，具体操作细节由 Skill 承载
+- 唯一查询入口是 `get-l2-insights`（由 Skill 内部定义）
 
 ### 4.6 DraftPES plan 阶段工具开放
 
@@ -269,60 +262,30 @@ phases:
 - 防御性检查：insight:evidence 1:1 不变式，违反时抛 RuntimeError
 - 测试更新：删除 3 个 list-drafts 测试，新增 run-id 过滤和 limit 测试
 
-### 5.4 Task 4：新建 draft-history-review Skill
+### 5.4 Task 4：新建 draft-history-review Skill ✅
 
-**目标**: 指导 Agent 在 plan 阶段查询前序 draft 经验并规划差异化方向。
+**状态**: 已完成（计划 043）
 
-**要干什么**
+**已实现**:
+- `core/prompts/skills/draft-history-review/SKILL.md` 已创建
+- 唯一查询入口 `get-l2-insights`，深查用 `get-draft-detail`
+- 明确"必须查询 → 按需深查 → 差异化规划"三层次引导
 
-- 创建 `core/prompts/skills/draft-history-review/SKILL.md`
-- 包含具体的 CLI 调用示例
-- **唯一查询入口是 `get-l2-insights`**（L2 = draft summarize 的索引），深查用 `get-draft-detail`
-- 明确"必须查询" vs "按需深查"的层次：
-  1. **必须执行**：调 `get-l2-insights` 查看前序 draft 经验（含 confidence、pattern、fitness）
-  2. **按需深查**：对感兴趣的条目调 `get-draft-detail` 获取完整 summarize_insight
-  3. **差异化规划**：基于查询结果选择与已有方案明确不同的方向
+### 5.5 Task 5：draft_plan 差异化约束 + plan 阶段开放 Bash ✅
 
-**涉及文件**
+**状态**: 已完成（计划 044）
 
-- `core/prompts/skills/draft-history-review/SKILL.md` [NEW]
+**已实现**:
+- `draft_plan.j2` 方案约束末尾新增一行 Skill 引导：引导 Agent 使用 `draft-history-review` skill 查询前序经验并差异化
+- 无条件渲染（无 `generation > 0` 分支）——首次 draft 查询返回空则正常规划，模板更简洁
+- 不硬编码 CLI 命令——遵循项目既有模式（模板只引导 Skill，细节由 Skill 承载）
+- `draft.yaml` plan phase `allowed_tools` 新增 `Bash`（完整列表：`["Bash", "Read", "Glob", "Grep"]`）
+- `max_turns: 3` 保持不变
+- `core/pes/draft.py` 无需修改——所有变量已在 prompt context 中
 
-**前置依赖**
-
-- Task 3.5（CLI 合并）完成后，Skill 中的 CLI 示例需使用增强后的 `get-l2-insights` 命令格式
-
-**测试通过标准**
-
-- Skill 文件存在且可被 project skill 机制发现
-- CLI 调用示例中的命令格式与增强后的 `get-l2-insights` 一致
-
-### 5.5 Task 5：draft_plan 差异化约束 + plan 阶段开放 Bash
-
-**目标**: 让 Agent 在 plan 阶段能查询前序 draft 经验，并被明确要求差异化。
-
-**要干什么**
-
-- 修改 `config/prompts/templates/draft_plan.j2`，新增差异化约束段落（`generation > 0` 条件渲染）
-- 差异化约束中引导 Agent 调 `get-l2-insights`（唯一查询入口），不再引导调 `list-drafts`
-- 修改 `config/pes/draft.yaml`，plan phase 添加 `allowed_tools: ["Bash"]` 和 `max_turns: 3`
-- 确保 `generation` 和 `run_id`、`db_path` 变量在 plan prompt context 中可用
-
-**涉及文件**
-
-- `config/prompts/templates/draft_plan.j2` [MODIFY]
-- `config/pes/draft.yaml` [MODIFY]
-- `core/pes/draft.py` [MODIFY]（如需补充 prompt context 变量）
-
-**前置依赖**
-
-- Task 3.5（CLI 合并）完成后，prompt 中的 CLI 示例需使用增强后的 `get-l2-insights` 命令格式
-
-**测试通过标准**
-
-- `generation=0` 时不渲染差异化段落
-- `generation>0` 时渲染差异化段落，含 `get-l2-insights` CLI 命令（非 `list-drafts`）
-- plan phase 的 `allowed_tools` 包含 `"Bash"`
-- plan phase 的 `max_turns` 为 3
+**与 TD §4.5 原始设计的偏差**:
+- 去掉 `{% if generation > 0 %}` 条件渲染（首次 draft 查询返回空即可，无需条件分支）
+- 不在模板中硬编码 CLI 命令（改为引导 Skill，与 `feature_extract_execute.j2`、`draft_summarize.j2` 既有模式一致）
 
 ### 5.6 Task 6：端到端验证
 
@@ -357,7 +320,7 @@ phases:
 - `summary_excerpt` 提取：验证从 summarize_insight 中提取摘要第一段的逻辑
 - L2 写入：验证 `_write_l2_knowledge()` 在成功/失败 case 下的行为
 - CLI 命令：验证 `list-drafts` / `get-draft-detail` / `get-l2-insights` 的输出格式
-- Prompt 渲染：验证 `draft_plan.j2` 在 `generation=0` 和 `generation>0` 时的差异
+- Prompt 渲染：验证 `draft_plan.j2` 包含 `draft-history-review` Skill 引导，无 generation 条件分支
 
 ### 6.2 集成测试
 
@@ -382,9 +345,9 @@ phases:
 | `core/cli/db.py` | MODIFY | get-draft-detail / get-l2-insights（已合并 list-drafts 功能） | ✅ |
 | `core/database/repositories/solution.py` | MODIFY | list_by_run_and_operation() | ✅ |
 | `core/database/repositories/l2.py` | MODIFY | get_insights_with_solution_info()（JOIN solution 信息） | ✅ |
-| `config/prompts/templates/draft_plan.j2` | MODIFY | 差异化约束（引导调 get-l2-insights） | Task 5 待完成 |
-| `config/pes/draft.yaml` | MODIFY | plan phase 开放 Bash、max_turns 调整 | Task 5 待完成 |
-| `core/prompts/skills/draft-history-review/SKILL.md` | NEW | 历史感知 Skill（唯一入口 get-l2-insights） | Task 4 待完成 |
+| `config/prompts/templates/draft_plan.j2` | MODIFY | 方案约束末尾新增 Skill 引导（无条件渲染） | ✅ |
+| `config/pes/draft.yaml` | MODIFY | plan phase 开放 Bash | ✅ |
+| `core/prompts/skills/draft-history-review/SKILL.md` | NEW | 历史感知 Skill（唯一入口 get-l2-insights） | ✅ |
 
 ---
 
