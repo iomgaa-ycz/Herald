@@ -6,3 +6,4 @@ workspace/
 .codex
 herald.db
 .claude/skills
+.env

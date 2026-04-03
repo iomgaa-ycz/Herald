@@ -147,6 +147,10 @@ def build_run_metadata(
 
 def main() -> None:
     """Herald 主流程：加载配置 → 创建工作空间 → 初始化数据库 → 初始化事件流系统。"""
+    from dotenv import load_dotenv
+
+    load_dotenv()  # 加载 .env 到 os.environ（必须在 ConfigManager.parse() 之前）
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

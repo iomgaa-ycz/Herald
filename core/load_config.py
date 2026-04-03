@@ -1,5 +1,7 @@
 import argparse
+import os
 from dataclasses import asdict, fields, is_dataclass
+from pathlib import Path
 from typing import TypeVar, Union, get_args, get_origin, get_type_hints
 
 import yaml
@@ -92,23 +94,49 @@ class ConfigManager:
             return lambda x: str(x).lower() in ["true", "1", "yes", "on"]
         return type_hint
 
+    @staticmethod
+    def _default_config_path() -> str:
+        """返回默认配置文件路径（项目根目录/config/herald.yaml）。"""
+        return str(Path(__file__).resolve().parents[1] / "config" / "herald.yaml")
+
+    def _apply_env_overrides(
+        self,
+        final_dict: dict[str, object],
+        all_fields: dict[str, object],
+    ) -> None:
+        """从 os.environ 读取 HERALD_* 变量覆盖配置。
+
+        映射规则：HERALD_LLM_MODEL → llm.model
+        即 HERALD_ 前缀 + 字段路径（点号转下划线，全大写）。
+        """
+        for field_path, field_type in all_fields.items():
+            env_key = "HERALD_" + field_path.replace(".", "_").upper()
+            env_val = os.environ.get(env_key)
+            if env_val is not None:
+                cast_fn = self._smart_cast(field_type)
+                self._set_nested_value(final_dict, field_path, cast_fn(env_val))
+
     def parse(self) -> HeraldConfig:
         # 1. 基础字典 (由默认配置生成)
         final_dict = asdict(self.config)
 
-        # 2. YAML 解析 (第二优先级)
+        # 2. YAML 解析（自动加载默认路径，--config 可覆盖）
         temp_parser = argparse.ArgumentParser(add_help=False)
         temp_parser.add_argument("--config", type=str, default=None)
         temp_args, _ = temp_parser.parse_known_args()
 
-        if temp_args.config:
-            with open(temp_args.config, encoding="utf-8") as f:
+        config_path = temp_args.config or self._default_config_path()
+        if Path(config_path).exists():
+            with open(config_path, encoding="utf-8") as f:
                 yaml_data = yaml.safe_load(f)
                 if yaml_data:
                     self._deep_update(final_dict, yaml_data)
 
-        # 3. CLI 动态解析 (第一优先级)
+        # 2.5 环境变量覆盖（优先级高于 YAML，低于 CLI）
         all_cli_fields = self._get_all_fields(HeraldConfig)
+        self._apply_env_overrides(final_dict, all_cli_fields)
+
+        # 3. CLI 动态解析 (第一优先级)
         cli_parser = argparse.ArgumentParser(description="Herald Configuration System")
         cli_parser.add_argument("--config", type=str, help="Path to YAML config file")
 
