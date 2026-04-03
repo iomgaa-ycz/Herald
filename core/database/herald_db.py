@@ -151,6 +151,18 @@ class HeraldDB:
     def get_l2_insights(self, slot: str, task_type: str | None = None) -> list[dict]:
         return self.l2.get_insights(slot, task_type)
 
+    def get_l2_insights_with_solution_info(
+        self,
+        slot: str,
+        task_type: str | None = None,
+        run_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """获取 L2 经验并 JOIN solution 信息。"""
+        return self.l2.get_insights_with_solution_info(
+            slot=slot, task_type=task_type, run_id=run_id, limit=limit
+        )
+
     def get_all_l2_insights(self) -> list[dict]:
         return self.l2.get_all_insights()
 

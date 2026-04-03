@@ -21,7 +21,6 @@ import sys
 from typing import Any
 
 from core.database.herald_db import HeraldDB
-from core.utils.text import extract_summary_excerpt
 
 
 def _get_db(db_path: str | None) -> HeraldDB:
@@ -107,33 +106,6 @@ def cmd_write_l2_insight(args: argparse.Namespace) -> None:
     print(json.dumps({"insight_id": insight_id}, ensure_ascii=False))
 
 
-def cmd_list_drafts(args: argparse.Namespace) -> None:
-    """列出当前 run 的所有 draft solution 简报。"""
-    db = _get_db(args.db_path)
-    status = None if args.status == "all" else args.status
-    rows = db.list_solutions_by_run_and_operation(
-        run_id=args.run_id,
-        operation="draft",
-        status=status,
-        limit=args.limit,
-    )
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        excerpt = extract_summary_excerpt(row.get("summarize_insight") or "")
-        result.append(
-            {
-                "solution_id": row["id"],
-                "generation": row["generation"],
-                "status": row["status"],
-                "fitness": row["fitness"],
-                "metric_name": row["metric_name"],
-                "metric_value": row["metric_value"],
-                "summary_excerpt": excerpt,
-            }
-        )
-    print(json.dumps(result, ensure_ascii=False))
-
-
 def cmd_get_draft_detail(args: argparse.Namespace) -> None:
     """获取单个 draft 的完整 summarize_insight。"""
     db = _get_db(args.db_path)
@@ -158,12 +130,17 @@ def cmd_get_draft_detail(args: argparse.Namespace) -> None:
 
 
 def cmd_get_l2_insights(args: argparse.Namespace) -> None:
-    """获取活跃的 L2 经验。"""
+    """获取活跃的 L2 经验（含 solution 的 fitness/metric 信息）。"""
     db = _get_db(args.db_path)
-    rows = db.get_l2_insights(slot="strategy", task_type=args.task_type)
-    limited = rows[: args.limit]
+    run_id = getattr(args, "run_id", None)
+    rows = db.get_l2_insights_with_solution_info(
+        slot="strategy",
+        task_type=args.task_type,
+        run_id=run_id,
+        limit=args.limit,
+    )
     result: list[dict[str, Any]] = []
-    for row in limited:
+    for row in rows:
         insight_text = row.get("insight") or ""
         if len(insight_text) > 500:
             insight_text = insight_text[:500]
@@ -175,6 +152,11 @@ def cmd_get_l2_insights(args: argparse.Namespace) -> None:
                 "insight": insight_text,
                 "confidence": row["confidence"],
                 "status": row["status"],
+                "source_solution_id": row.get("source_solution_id"),
+                "fitness": row.get("fitness"),
+                "metric_name": row.get("metric_name"),
+                "metric_value": row.get("metric_value"),
+                "solution_status": row.get("solution_status"),
             }
         )
     print(json.dumps(result, ensure_ascii=False))
@@ -226,23 +208,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--db-path", default=None, help="数据库路径（也可用 HERALD_DB_PATH）"
     )
 
-    # list-drafts
-    p_list_drafts = sub.add_parser(
-        "list-drafts", help="列出当前 run 的所有 draft solution 简报"
-    )
-    p_list_drafts.add_argument("--run-id", required=True, help="运行 ID")
-    p_list_drafts.add_argument(
-        "--limit", type=int, default=20, help="最大返回条数（默认 20）"
-    )
-    p_list_drafts.add_argument(
-        "--status",
-        default="all",
-        help="状态过滤: completed|failed|all（默认 all）",
-    )
-    p_list_drafts.add_argument(
-        "--db-path", default=None, help="数据库路径（也可用 HERALD_DB_PATH）"
-    )
-
     # get-draft-detail
     p_draft_detail = sub.add_parser(
         "get-draft-detail", help="获取单个 draft 的完整 summarize_insight"
@@ -253,10 +218,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # get-l2-insights
-    p_l2_insights = sub.add_parser("get-l2-insights", help="获取活跃的 L2 经验")
+    p_l2_insights = sub.add_parser(
+        "get-l2-insights", help="获取活跃的 L2 经验（含 solution fitness/metric 信息）"
+    )
     p_l2_insights.add_argument(
         "--task-type", required=True, help="任务类型（如 tabular）"
     )
+    p_l2_insights.add_argument("--run-id", default=None, help="按 run_id 过滤（可选）")
     p_l2_insights.add_argument(
         "--limit", type=int, default=20, help="最大返回条数（默认 20）"
     )
@@ -272,7 +240,6 @@ _COMMANDS = {
     "get-population-summary": cmd_get_population_summary,
     "read-gene-code": cmd_read_gene_code,
     "write-l2-insight": cmd_write_l2_insight,
-    "list-drafts": cmd_list_drafts,
     "get-draft-detail": cmd_get_draft_detail,
     "get-l2-insights": cmd_get_l2_insights,
 }

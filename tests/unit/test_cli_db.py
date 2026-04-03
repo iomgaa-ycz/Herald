@@ -1,4 +1,4 @@
-"""CLI db.py 新命令单元测试：list-drafts / get-draft-detail / get-l2-insights。"""
+"""CLI db.py 命令单元测试：get-draft-detail / get-l2-insights。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from core.cli.db import cmd_get_draft_detail, cmd_get_l2_insights, cmd_list_drafts
+from core.cli.db import cmd_get_draft_detail, cmd_get_l2_insights
 from core.database.herald_db import HeraldDB
 from core.pes.types import PESSolution
 from core.utils.utils import utc_now_iso
@@ -40,7 +40,7 @@ def _make_db(tmp_path: Path) -> HeraldDB:
         )
         db.insert_solution(record)
 
-    # 插入 L2 insight
+    # 插入 L2 insight（关联 sol-000，run-001）
     db.upsert_l2_insight(
         slot="strategy",
         task_type="tabular",
@@ -49,6 +49,7 @@ def _make_db(tmp_path: Path) -> HeraldDB:
         solution_id="sol-000",
         evidence_type="support",
     )
+    # 插入 L2 insight（关联 sol-002，run-001）
     db.upsert_l2_insight(
         slot="strategy",
         task_type="tabular",
@@ -59,69 +60,6 @@ def _make_db(tmp_path: Path) -> HeraldDB:
     )
 
     return db
-
-
-def test_list_drafts_json_format(tmp_path: Path, capsys: object) -> None:
-    """list-drafts 输出 JSON 格式正确，含 summary_excerpt。"""
-    db = _make_db(tmp_path)
-    args = argparse.Namespace(
-        run_id="run-001",
-        limit=20,
-        status="all",
-        db_path=str(tmp_path / "herald.db"),
-    )
-    cmd_list_drafts(args)
-    db.close()
-
-    captured = capsys.readouterr()  # type: ignore[union-attr]
-    data = json.loads(captured.out)
-
-    assert isinstance(data, list)
-    assert len(data) == 5
-    for item in data:
-        assert "solution_id" in item
-        assert "generation" in item
-        assert "status" in item
-        assert "summary_excerpt" in item
-
-    # completed 的行应有非空 excerpt
-    completed_items = [d for d in data if d["status"] == "completed"]
-    assert all(d["summary_excerpt"] != "" for d in completed_items)
-
-
-def test_list_drafts_limit(tmp_path: Path, capsys: object) -> None:
-    """--limit 参数生效。"""
-    db = _make_db(tmp_path)
-    args = argparse.Namespace(
-        run_id="run-001",
-        limit=2,
-        status="all",
-        db_path=str(tmp_path / "herald.db"),
-    )
-    cmd_list_drafts(args)
-    db.close()
-
-    captured = capsys.readouterr()  # type: ignore[union-attr]
-    data = json.loads(captured.out)
-    assert len(data) == 2
-
-
-def test_list_drafts_status_filter(tmp_path: Path, capsys: object) -> None:
-    """--status 过滤生效。"""
-    db = _make_db(tmp_path)
-    args = argparse.Namespace(
-        run_id="run-001",
-        limit=20,
-        status="completed",
-        db_path=str(tmp_path / "herald.db"),
-    )
-    cmd_list_drafts(args)
-    db.close()
-
-    captured = capsys.readouterr()  # type: ignore[union-attr]
-    data = json.loads(captured.out)
-    assert all(d["status"] == "completed" for d in data)
-    assert len(data) == 3  # generation 0, 2, 4
 
 
 def test_get_draft_detail_returns_full_insight(tmp_path: Path, capsys: object) -> None:
@@ -142,10 +80,11 @@ def test_get_draft_detail_returns_full_insight(tmp_path: Path, capsys: object) -
 
 
 def test_get_l2_insights_json_format(tmp_path: Path, capsys: object) -> None:
-    """get-l2-insights 返回 L2 经验列表，insight 被截断。"""
+    """get-l2-insights 返回增强 L2 经验列表，含 solution 信息。"""
     db = _make_db(tmp_path)
     args = argparse.Namespace(
         task_type="tabular",
+        run_id=None,
         limit=20,
         db_path=str(tmp_path / "herald.db"),
     )
@@ -157,10 +96,78 @@ def test_get_l2_insights_json_format(tmp_path: Path, capsys: object) -> None:
     assert isinstance(data, list)
     assert len(data) == 2
     for item in data:
+        # 原有字段
         assert "id" in item
         assert "slot" in item
         assert "pattern" in item
         assert "insight" in item
         assert "confidence" in item
         assert "status" in item
+        # 新增字段
+        assert "source_solution_id" in item
+        assert "fitness" in item
+        assert "metric_name" in item
+        assert "metric_value" in item
+        assert "solution_status" in item
+        # insight 截断
         assert len(item["insight"]) <= 500
+
+    # 验证关联到正确的 solution
+    sol_ids = {item["source_solution_id"] for item in data}
+    assert sol_ids == {"sol-000", "sol-002"}
+
+    # 验证 fitness 值
+    for item in data:
+        if item["source_solution_id"] == "sol-000":
+            assert item["fitness"] == 0.8
+            assert item["metric_name"] == "auc"
+            assert item["solution_status"] == "completed"
+
+
+def test_get_l2_insights_with_run_id(tmp_path: Path, capsys: object) -> None:
+    """--run-id 过滤生效。"""
+    db = _make_db(tmp_path)
+
+    # 用存在的 run-id 查询
+    args = argparse.Namespace(
+        task_type="tabular",
+        run_id="run-001",
+        limit=20,
+        db_path=str(tmp_path / "herald.db"),
+    )
+    cmd_get_l2_insights(args)
+
+    captured = capsys.readouterr()  # type: ignore[union-attr]
+    data = json.loads(captured.out)
+    assert len(data) == 2
+
+    # 用不存在的 run-id 查询
+    args2 = argparse.Namespace(
+        task_type="tabular",
+        run_id="run-999",
+        limit=20,
+        db_path=str(tmp_path / "herald.db"),
+    )
+    cmd_get_l2_insights(args2)
+    db.close()
+
+    captured2 = capsys.readouterr()  # type: ignore[union-attr]
+    data2 = json.loads(captured2.out)
+    assert len(data2) == 0
+
+
+def test_get_l2_insights_limit(tmp_path: Path, capsys: object) -> None:
+    """--limit 参数生效。"""
+    db = _make_db(tmp_path)
+    args = argparse.Namespace(
+        task_type="tabular",
+        run_id=None,
+        limit=1,
+        db_path=str(tmp_path / "herald.db"),
+    )
+    cmd_get_l2_insights(args)
+    db.close()
+
+    captured = capsys.readouterr()  # type: ignore[union-attr]
+    data = json.loads(captured.out)
+    assert len(data) == 1

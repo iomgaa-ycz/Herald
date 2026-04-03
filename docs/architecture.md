@@ -486,11 +486,12 @@ L2 已接入主流程：Draft Summarize 完成后自动调用 `_write_l2_knowled
 2. **L2 经验自动沉淀** — Summarize 完成后自动将 draft 经验写入 `l2_insights`（L2 = draft summarize 的加工产物，提供 confidence 评分和 pattern 索引）
 3. **CLI 查询** — `get-l2-insights`（查询 L2 经验）、`get-draft-detail`（深查完整总结）
 
+4. **CLI 合并** — 删除 `list-drafts`，增强 `get-l2-insights`（补充 fitness/metric/run-id 过滤 + 1:1 防御检查）
+
 **待完成：**
-1. **CLI 合并** — 删除冗余的 `list-drafts` 命令，将其功能合并到 `get-l2-insights`（补充 fitness/metric/run-id 过滤）
-2. **Draft 历史感知 Skill** — 指导 Agent 在 plan 阶段通过 Bash 调 `get-l2-insights` 查询前序 draft 经验
-3. **差异化约束** — prompt 中明确要求”先查历史，不重复已有策略”
-4. **plan 阶段工具开放** — 让 Agent 在 plan 阶段能调 Bash 查询 DB
+1. **Draft 历史感知 Skill** — 指导 Agent 在 plan 阶段通过 Bash 调 `get-l2-insights` 查询前序 draft 经验
+2. **差异化约束** — prompt 中明确要求“先查历史，不重复已有策略”
+3. **plan 阶段工具开放** — 让 Agent 在 plan 阶段能调 Bash 查询 DB
 
 关键设计决策：
 - **Draft 没有 parent**：Draft 的语义是”独立探索新方向”，不是 Mutate。它需要知道其他 draft 做了什么（简报级），但不继承代码
@@ -525,7 +526,7 @@ L2 已接入主流程：Draft Summarize 完成后自动调用 `_write_l2_knowled
 | M0 | 单 `DraftPES` 调用链打通 | BasePES + DraftPES 三阶段 | ✅ 完成 |
 | M0.3 | FeatureExtractPES + GenomeSchema 模板 | FeatureExtractPES、task_stages 调度、tabular/generic 模板 | ✅ 完成 |
 | M0.5 | 真实代码落盘、首次执行与事实记录 | tool-write 契约、solution.py、metrics、submission、exec_logs | ✅ 完成 |
-| **M0.7** | **多次 Draft + 差异化生成** | **Summarize 固定格式 ✅、L2 写入 ✅、CLI 查询（合并中）、draft-history-review Skill、差异化约束** | **← 当前** |
+| **M0.7** | **多次 Draft + 差异化生成** | **Summarize 固定格式 ✅、L2 写入 ✅、CLI 查询 ✅（含合并）、draft-history-review Skill、差异化约束** | **← 当前** |
 | M1 | 单谱系进化 | MutatePES、parent/child、genes/snapshots 真接入 | 待开始 |
 | M2 | 完整方案级搜索骨架 | MergePES、L3 回流、schema 驱动搜索 | 待开始 |
 | M3 | 并行与编排 | 多任务调度、预算管理、并行执行 | 待开始 |
@@ -549,4 +550,4 @@ Herald2 的正确方向不是”把更多 Agent 堆起来”，而是：
 
 **以 `TaskSpec / GenomeSchema` 定义搜索空间，以 `BasePES` 定义研究循环，以 `Workspace + HeraldDB` 定义可追踪 Harness，再在这个稳定底座上逐步长出 `Draft -> Mutate -> Merge -> Population -> Orchestrator`。**
 
-当前系统已完成单 Draft 闭环的全部 Harness 能力和 L2 经验沉淀机制（M0~M0.5 + M0.7 部分），正在进入**多次 Draft 差异化生成**阶段。下一步是通过 CLI 合并、draft-history-review Skill 和差异化约束，使每次 Draft 能感知前序 Draft 的策略与结果（L2 = draft summarize 的索引/加工视图），避免重复探索，真正扩大样本池。
+当前系统已完成单 Draft 闭环的全部 Harness 能力、L2 经验沉淀机制和 CLI 统一查询入口（M0~M0.5 + M0.7 部分），正在进入**多次 Draft 差异化生成**阶段。下一步是通过 draft-history-review Skill、差异化约束和 plan 阶段 Bash 工具开放，使每次 Draft 能感知前序 Draft 的策略与结果（L2 = draft summarize 的索引/加工视图），避免重复探索，真正扩大样本池。

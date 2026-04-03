@@ -258,52 +258,16 @@ phases:
 - `list-drafts`：已实现但将在 Task 3.5 中删除并合并到 `get-l2-insights`
 - `SolutionRepository.list_by_run_and_operation()` 已实现
 
-### 5.3.5 Task 3.5：合并 CLI — 删除 list-drafts，增强 get-l2-insights
+### 5.3.5 Task 3.5：合并 CLI — 删除 list-drafts，增强 get-l2-insights ✅
 
-**目标**: 消除冗余 CLI 入口。L2 = draft summarize 的索引，不需要 `list-drafts` 和 `get-l2-insights` 两个独立命令。
+**状态**: 已完成（计划 042）
 
-**要干什么**
-
-- 删除 `core/cli/db.py` 中的 `cmd_list_drafts` 函数和 argparse 注册
-- 增强 `get-l2-insights`：
-  - 新增 `--run-id` 可选参数（通过 `l2_evidence.solution_id` JOIN `solutions.run_id` 过滤）
-  - 输出补充每条 insight 对应 solution 的 fitness / metric_name / metric_value / solution_status
-  - 实现方式：`L2Repository` 新增查询方法 JOIN `l2_evidence` + `solutions`，或在 CLI 层做二次查询（MVP 优先）
-- 删除 `tests/unit/test_cli_db.py` 中 `list-drafts` 相关测试
-- 更新 `get-l2-insights` 测试以验证新增字段
-
-**增强后 `get-l2-insights` 输出格式**
-
-```json
-[
-  {
-    "id": 1,
-    "slot": "strategy",
-    "pattern": "...",
-    "insight": "...(截断500字符)",
-    "confidence": 1.5,
-    "status": "active",
-    "source_solution_id": "uuid",
-    "fitness": 0.8123,
-    "metric_name": "auc",
-    "metric_value": 0.8123,
-    "solution_status": "completed"
-  }
-]
-```
-
-**涉及文件**
-
-- `core/cli/db.py` [MODIFY] — 删除 list-drafts，增强 get-l2-insights
-- `core/database/repositories/l2.py` 或 `core/database/herald_db.py` [MODIFY] — 增强查询
-- `tests/unit/test_cli_db.py` [MODIFY] — 删除/更新测试
-
-**测试通过标准**
-
-- `list-drafts` 命令不再存在
-- `get-l2-insights --task-type tabular --run-id <id>` 返回含 fitness/metric 信息的 JSON
-- 不传 `--run-id` 时返回全部 L2 经验
-- `--limit` 参数生效
+**已实现**:
+- 删除 `cmd_list_drafts` 函数、argparse 注册、`_COMMANDS` 映射
+- `L2Repository.get_insights_with_solution_info()` — JOIN `l2_evidence` + `solutions`，一次查询获取增强信息
+- `get-l2-insights` 新增 `--run-id` 可选参数，输出补充 `source_solution_id` / `fitness` / `metric_name` / `metric_value` / `solution_status`
+- 防御性检查：insight:evidence 1:1 不变式，违反时抛 RuntimeError
+- 测试更新：删除 3 个 list-drafts 测试，新增 run-id 过滤和 limit 测试
 
 ### 5.4 Task 4：新建 draft-history-review Skill
 
@@ -415,10 +379,9 @@ phases:
 |------|----------|------|------|
 | `config/prompts/templates/draft_summarize.j2` | MODIFY | 固定五小节段落式输出格式 | ✅ |
 | `core/pes/draft.py` | MODIFY | L2 写入 | ✅ |
-| `core/cli/db.py` | MODIFY | get-draft-detail / get-l2-insights | ✅（Task 3.5 将删除 list-drafts 并增强 get-l2-insights） |
+| `core/cli/db.py` | MODIFY | get-draft-detail / get-l2-insights（已合并 list-drafts 功能） | ✅ |
 | `core/database/repositories/solution.py` | MODIFY | list_by_run_and_operation() | ✅ |
-| `core/cli/db.py` | MODIFY | 删除 list-drafts，增强 get-l2-insights | Task 3.5 待完成 |
-| `core/database/repositories/l2.py` | MODIFY | 增强查询（JOIN solution 信息） | Task 3.5 待完成 |
+| `core/database/repositories/l2.py` | MODIFY | get_insights_with_solution_info()（JOIN solution 信息） | ✅ |
 | `config/prompts/templates/draft_plan.j2` | MODIFY | 差异化约束（引导调 get-l2-insights） | Task 5 待完成 |
 | `config/pes/draft.yaml` | MODIFY | plan phase 开放 Bash、max_turns 调整 | Task 5 待完成 |
 | `core/prompts/skills/draft-history-review/SKILL.md` | NEW | 历史感知 Skill（唯一入口 get-l2-insights） | Task 4 待完成 |
