@@ -19,17 +19,19 @@ main.py
   -> Scheduler(task_stages=[("feature_extract", 1), ("draft", N)])
   -> FeatureExtractPES(1次) -> TaskSpec + data_profile
   -> DraftPES(N次，每次独立探索)
-     -> plan: 先通过 Skill 调 CLI 查询历史 draft 简报 + L2 经验，再规划差异化方向
+     -> plan: 先通过 Skill 调 CLI 查询前序 draft 经验（get-l2-insights），再规划差异化方向
      -> execute: 生成 solution.py / submission.csv
-     -> summarize: 固定格式总结，写入 L2 知识
+     -> summarize: 固定格式总结，自动写入 L2（L2 = draft summarize 的索引/加工视图）
   -> 扩大样本池，积累方案级经验
 ```
+
+**关键概念澄清**：每次 run 前清除 DB，不存在跨 run 经验。L2 不是独立于 draft 的知识层——`l2_insights` 中的数据全部来自本 run 内前序 draft 的 summarize_insight 经 `_write_l2_knowledge()` 处理后写入。Agent 获取前序 draft 经验的唯一 CLI 入口是 `get-l2-insights`（含 confidence 评分和 pattern 索引），深查用 `get-draft-detail`。
 
 本 TD 文档回答三个问题：
 
 1. 第二阶段需要变更哪些模块
 2. 每个变更的接口与行为应该长什么样
-3. 如何验证"多次 draft + L2 知识回流 + 差异化生成"确实成立
+3. 如何验证"多次 draft + 差异化生成"确实成立
 
 ---
 
@@ -38,9 +40,10 @@ main.py
 | 决策项 | 结论 | 理由 |
 |---|---|---|
 | Draft 与 parent 的关系 | Draft 没有 parent，每次独立探索 | Draft 的语义是"从零探索新方向"，不是 Mutate；parent 意味着继承完整代码，但 draft 只需知道前序策略简报 |
-| 历史信息传递方式 | Skill 调 CLI 查询 DB | Agent 已有 Bash 工具，按需查询不膨胀 prompt；Agent 更容易学会通过 bash 调用接口 |
+| 历史信息传递方式 | Skill 调 `get-l2-insights` CLI 查询 | Agent 已有 Bash 工具，按需查询不膨胀 prompt；L2 = draft summarize 的索引，单一入口避免概念混淆 |
 | Summarize 输出格式 | 固定五小节结构，每节一段逻辑通顺的话 | 消费者是 LLM Agent，段落比列点更能表达因果关系 |
 | L2 知识写入时机 | Summarize 阶段结束后 | 此时 metrics / exec_logs 已确定，信息完整 |
+| L2 的真实语义 | L2 = draft summarize 的索引/加工视图 | 每次 run 清 DB，不存在跨 run 经验；L2 提供 confidence 评分和 pattern 索引，但数据源就是 draft summarize |
 | L2 知识粒度 | 方案级（整体策略 + 结果），不做 slot 级拆分 | MVP 阶段先粗后细 |
 | 差异化机制 | Skill 引导 + prompt 约束 | 先靠 prompt 引导，不做 banned strategy list |
 | Draft 次数预期 | 10+ 次 | 真正扩大样本池，CLI 查询需做截断控制（list-drafts 默认 limit 20） |
@@ -52,14 +55,14 @@ main.py
 
 ### 3.1 本阶段必须完成
 
-- Draft Summarize 固定格式输出（五小节段落式）
-- Summarize 完成后写入 L2 知识（`l2_insights` + `l2_evidence`）
-- CLI 新增 `list-drafts` 命令（返回所有 draft 的简报，含截断控制）
-- CLI 新增 `get-draft-detail` 命令（按需深查单个 draft 的完整 summarize_insight）
-- CLI 新增 `get-l2-insights` 命令（返回活跃的 L2 经验）
-- 新建 Skill: `draft-history-review`（指导 Agent 在 plan 阶段查询历史并规划差异化）
+- ✅ Draft Summarize 固定格式输出（五小节段落式）
+- ✅ Summarize 完成后写入 L2（`l2_insights` + `l2_evidence`）
+- ✅ CLI 新增 `get-draft-detail` 命令（按需深查单个 draft 的完整 summarize_insight）
+- ✅ CLI 新增 `get-l2-insights` 命令（返回活跃的 L2 经验）
+- ~~CLI 新增 `list-drafts` 命令~~ → 已合并到 `get-l2-insights`（见 Task 3.5）
+- 合并 CLI：删除 `list-drafts`，增强 `get-l2-insights`（补充 fitness/metric/run-id 过滤）
+- 新建 Skill: `draft-history-review`（指导 Agent 在 plan 阶段调 `get-l2-insights` 查询前序 draft 经验并规划差异化）
 - `draft_plan.j2` 增加差异化约束文本
-- `draft_summarize.j2` 更新为固定格式要求
 - `config/pes/draft.yaml` plan phase 开放 Bash 工具
 - 运行 N 次 draft 时，后续 draft 能感知前序 draft 的策略与结果
 
@@ -136,41 +139,22 @@ DraftPES.handle_phase_response(phase="summarize")
 
 ### 4.3 CLI 查询扩展
 
-**文件**: `core/cli/db.py`
-**变更类型**: MODIFY — 新增三个命令
+**状态**: ✅ 已完成基础实现，待 Task 3.5 合并优化
 
-**文件**: `core/database/repositories/solution.py`
-**变更类型**: MODIFY — 新增查询方法
+**已实现**：
 
-#### `list-drafts` 命令
+#### `get-l2-insights` 命令（主查询入口）
 
-列出当前 run 的所有 draft solution 简报。
+获取前序 draft 经验（L2 = draft summarize 的索引/加工视图）。
 
 ```bash
-python core/cli/db.py list-drafts --run-id <run_id> --db-path <path>
+python core/cli/db.py get-l2-insights --task-type tabular --db-path <path>
 # 可选: --limit N (默认 20)
-# 可选: --status completed|failed|all (默认 all)
 ```
 
-输出 JSON 数组，每个元素只包含摘要级信息：
+当前输出 JSON 数组含 `slot`、`pattern`、`insight`（截断）、`confidence`、`status`。
 
-```json
-[
-  {
-    "solution_id": "...",
-    "generation": 1,
-    "status": "completed",
-    "fitness": 0.8123,
-    "metric_name": "auc",
-    "metric_value": 0.8123,
-    "summary_excerpt": "（从 summarize_insight 的 # 摘要 小节提取的第一段，截断到 300 字符）"
-  }
-]
-```
-
-设计理由：
-- 10+ 次 draft 时，完整 summarize_insight 会过长，简报足够 Agent 判断是否需要深查
-- `summary_excerpt` 的截断逻辑与 L2 写入的 `pattern` 提取逻辑共用同一函数
+**Task 3.5 将增强此命令**：新增 `--run-id` 过滤、补充 fitness/metric 信息、删除冗余的 `list-drafts`。
 
 #### `get-draft-detail` 命令
 
@@ -180,33 +164,15 @@ python core/cli/db.py list-drafts --run-id <run_id> --db-path <path>
 python core/cli/db.py get-draft-detail --solution-id <uuid> --db-path <path>
 ```
 
-输出包含完整 `summarize_insight` 的 JSON 对象。Agent 在 `list-drafts` 看到感兴趣的条目后按需深查。
+Agent 在 `get-l2-insights` 看到感兴趣的条目后按需深查。
 
-#### `get-l2-insights` 命令
+#### ~~`list-drafts` 命令~~（已废弃，将在 Task 3.5 删除）
 
-获取活跃的 L2 经验。
+原设计将 `list-drafts` 和 `get-l2-insights` 作为两个独立入口，但实际上 L2 = draft summarize 的加工产物，两者查询同一来源数据。Task 3.5 将删除 `list-drafts` 并将其功能（fitness/metric/run-id）合并到 `get-l2-insights`。
 
-```bash
-python core/cli/db.py get-l2-insights --task-type tabular --db-path <path>
-# 可选: --limit N (默认 20)
-```
+#### Repository 层
 
-输出 JSON 数组，每个元素包含 `slot`、`pattern`、`insight`（截断）、`confidence`、`status`。
-
-#### Repository 层变更
-
-`SolutionRepository` 新增：
-
-```python
-def list_by_run_and_operation(
-    self,
-    run_id: str,
-    operation: str,
-    status: str | None = None,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """查询指定 run 下某操作类型的 solution 列表。"""
-```
+`SolutionRepository.list_by_run_and_operation()` 已实现（被 `list-drafts` 使用，Task 3.5 删除 `list-drafts` 后将由增强版 `get-l2-insights` 复用或替代）。
 
 ### 4.4 Draft 历史感知 Skill
 
@@ -215,13 +181,12 @@ def list_by_run_and_operation(
 
 Skill 内容要点：
 
-1. **必须执行**：在 draft_plan 阶段开始规划前，先调用 `list-drafts` 查看当前 run 已有的 draft 方案
-2. **建议执行**：调用 `get-l2-insights` 查看已积累的方案级经验
-3. **按需深查**：对感兴趣的 draft 调用 `get-draft-detail` 获取完整总结
-4. **差异化规划**：基于查询结果，选择一个与已有方案明确不同的方向（不同模型、不同特征工程策略、不同验证策略等）
-5. **禁止重复**：不允许重复已有方案的核心策略
+1. **必须执行**：在 draft_plan 阶段开始规划前，先调用 `get-l2-insights` 查看前序 draft 经验（L2 = draft summarize 的索引，含 confidence、pattern、fitness/metric 信息）
+2. **按需深查**：对感兴趣的条目调用 `get-draft-detail` 获取完整 summarize_insight
+3. **差异化规划**：基于查询结果，选择一个与已有方案明确不同的方向（不同模型、不同特征工程策略、不同验证策略等）
+4. **禁止重复**：不允许重复已有方案的核心策略
 
-Skill 中提供具体的 CLI 调用示例，降低 Agent 学习成本。
+Skill 中提供具体的 CLI 调用示例，降低 Agent 学习成本。`get-l2-insights` 是唯一查询入口，不再需要单独查 `list-drafts`。
 
 ### 4.5 draft_plan.j2 差异化约束
 
@@ -235,7 +200,7 @@ Skill 中提供具体的 CLI 调用示例，降低 Agent 学习成本。
 # 差异化要求
 
 本次 draft 是独立探索，不是对某个已有方案的改进。
-你必须先通过 Bash 调用 `python core/cli/db.py list-drafts --run-id {{ run_id }} --db-path {{ db_path }}` 查询当前 run 已有的 draft 方案。
+你必须先通过 Bash 调用 `python core/cli/db.py get-l2-insights --task-type {{ task_spec.task_type }} --run-id {{ run_id }} --db-path {{ db_path }}` 查询前序 draft 经验。
 如果已有方案，你必须选择一个明确不同的方向（不同模型、不同特征工程策略、不同验证策略等）。
 不允许重复已有方案的核心策略。
 {% endif %}
@@ -243,7 +208,7 @@ Skill 中提供具体的 CLI 调用示例，降低 Agent 学习成本。
 
 关键设计：
 - `generation > 0` 条件判断：第一次 draft 无需查询历史
-- 提供具体的 CLI 命令，减少 Agent 猜测
+- 唯一查询入口是 `get-l2-insights`（L2 = draft summarize 的索引）
 - 差异化是"要求"不是"建议"，prompt 中使用"必须"
 
 ### 4.6 DraftPES plan 阶段工具开放
@@ -273,95 +238,108 @@ phases:
 
 ## 5. 下一步任务清单
 
-### 5.1 Task 1：Draft Summarize 固定格式
+### 5.1 Task 1：Draft Summarize 固定格式 ✅
 
-**目标**: 让 summarize 输出结构化、可解析、可被后续 draft 消费。
+**状态**: 已完成（计划 039）
 
-**要干什么**
+### 5.2 Task 2：Summarize 阶段写入 L2 ✅
 
-- 重写 `config/prompts/templates/draft_summarize.j2` 的输出格式要求
-- 五个固定小节：摘要 / 策略选择 / 执行结果 / 关键发现 / 建议方向
-- 每个小节必须是一段逻辑通顺的话
+**状态**: 已完成（计划 040）
 
-**涉及文件**
+**澄清**：L2 = draft summarize 的索引/加工视图，不是独立于 draft 的知识层。`_write_l2_knowledge()` 从 summarize_insight 提取 pattern 写入 `l2_insights`，提供 confidence 评分机制。
 
-- `config/prompts/templates/draft_summarize.j2` [MODIFY]
+### 5.3 Task 3：CLI 新增 get-draft-detail / get-l2-insights ✅
 
-**测试通过标准**
+**状态**: 已完成（计划 041）
 
-- 回放 case 验证输出满足固定五小节结构
-- 每个小节是段落而非列点
+**已实现**:
+- `get-draft-detail`：返回完整 `summarize_insight`
+- `get-l2-insights`：返回 L2 经验列表
+- `list-drafts`：已实现但将在 Task 3.5 中删除并合并到 `get-l2-insights`
+- `SolutionRepository.list_by_run_and_operation()` 已实现
 
-### 5.2 Task 2：Summarize 阶段写入 L2
+### 5.3.5 Task 3.5：合并 CLI — 删除 list-drafts，增强 get-l2-insights
 
-**目标**: 让每次 draft 的经验自动沉淀到 L2 知识层。
-
-**要干什么**
-
-- 在 `DraftPES.handle_phase_response` 的 summarize 分支新增 `_write_l2_knowledge()` 方法
-- 从 summarize_insight 的 "# 摘要" 小节提取第一段作为 pattern
-- 调用 `L2Repository.upsert_insight()`
-- completed 方案用 `evidence_type="support"`，failed 方案用 `evidence_type="contradict"`
-- 失败时仅 warn，不阻塞主链路
-
-**涉及文件**
-
-- `core/pes/draft.py` [MODIFY]
-
-**测试通过标准**
-
-- 成功 case 验证 `l2_insights` 表中有条目
-- 失败 case 验证 `l2_evidence` 中 `evidence_type="contradict"`
-- L2 写入失败不影响 solution 状态
-
-### 5.3 Task 3：CLI 新增 list-drafts / get-draft-detail / get-l2-insights
-
-**目标**: 让 Agent 能通过 Bash 按需查询历史 draft 和 L2 经验。
+**目标**: 消除冗余 CLI 入口。L2 = draft summarize 的索引，不需要 `list-drafts` 和 `get-l2-insights` 两个独立命令。
 
 **要干什么**
 
-- 在 `core/cli/db.py` 新增三个命令
-- 在 `core/database/repositories/solution.py` 新增 `list_by_run_and_operation()` 方法
-- 实现 `summary_excerpt` 提取逻辑（从 summarize_insight 的 # 摘要小节提取第一段，截断 300 字符）
+- 删除 `core/cli/db.py` 中的 `cmd_list_drafts` 函数和 argparse 注册
+- 增强 `get-l2-insights`：
+  - 新增 `--run-id` 可选参数（通过 `l2_evidence.solution_id` JOIN `solutions.run_id` 过滤）
+  - 输出补充每条 insight 对应 solution 的 fitness / metric_name / metric_value / solution_status
+  - 实现方式：`L2Repository` 新增查询方法 JOIN `l2_evidence` + `solutions`，或在 CLI 层做二次查询（MVP 优先）
+- 删除 `tests/unit/test_cli_db.py` 中 `list-drafts` 相关测试
+- 更新 `get-l2-insights` 测试以验证新增字段
+
+**增强后 `get-l2-insights` 输出格式**
+
+```json
+[
+  {
+    "id": 1,
+    "slot": "strategy",
+    "pattern": "...",
+    "insight": "...(截断500字符)",
+    "confidence": 1.5,
+    "status": "active",
+    "source_solution_id": "uuid",
+    "fitness": 0.8123,
+    "metric_name": "auc",
+    "metric_value": 0.8123,
+    "solution_status": "completed"
+  }
+]
+```
 
 **涉及文件**
 
-- `core/cli/db.py` [MODIFY]
-- `core/database/repositories/solution.py` [MODIFY]
+- `core/cli/db.py` [MODIFY] — 删除 list-drafts，增强 get-l2-insights
+- `core/database/repositories/l2.py` 或 `core/database/herald_db.py` [MODIFY] — 增强查询
+- `tests/unit/test_cli_db.py` [MODIFY] — 删除/更新测试
 
 **测试通过标准**
 
-- `list-drafts` 输出 JSON 格式正确，含 `summary_excerpt`
-- `get-draft-detail` 返回完整 `summarize_insight`
-- `get-l2-insights` 返回 L2 经验列表
+- `list-drafts` 命令不再存在
+- `get-l2-insights --task-type tabular --run-id <id>` 返回含 fitness/metric 信息的 JSON
+- 不传 `--run-id` 时返回全部 L2 经验
 - `--limit` 参数生效
 
 ### 5.4 Task 4：新建 draft-history-review Skill
 
-**目标**: 指导 Agent 在 plan 阶段查询历史并规划差异化方向。
+**目标**: 指导 Agent 在 plan 阶段查询前序 draft 经验并规划差异化方向。
 
 **要干什么**
 
 - 创建 `core/prompts/skills/draft-history-review/SKILL.md`
 - 包含具体的 CLI 调用示例
-- 明确"必须查询" vs "建议查询" vs "按需深查"的层次
+- **唯一查询入口是 `get-l2-insights`**（L2 = draft summarize 的索引），深查用 `get-draft-detail`
+- 明确"必须查询" vs "按需深查"的层次：
+  1. **必须执行**：调 `get-l2-insights` 查看前序 draft 经验（含 confidence、pattern、fitness）
+  2. **按需深查**：对感兴趣的条目调 `get-draft-detail` 获取完整 summarize_insight
+  3. **差异化规划**：基于查询结果选择与已有方案明确不同的方向
 
 **涉及文件**
 
 - `core/prompts/skills/draft-history-review/SKILL.md` [NEW]
 
+**前置依赖**
+
+- Task 3.5（CLI 合并）完成后，Skill 中的 CLI 示例需使用增强后的 `get-l2-insights` 命令格式
+
 **测试通过标准**
 
 - Skill 文件存在且可被 project skill 机制发现
-- CLI 调用示例中的命令格式与 Task 3 实现一致
+- CLI 调用示例中的命令格式与增强后的 `get-l2-insights` 一致
 
 ### 5.5 Task 5：draft_plan 差异化约束 + plan 阶段开放 Bash
 
-**目标**: 让 Agent 在 plan 阶段能查询历史，并被明确要求差异化。
+**目标**: 让 Agent 在 plan 阶段能查询前序 draft 经验，并被明确要求差异化。
 
 **要干什么**
 
 - 修改 `config/prompts/templates/draft_plan.j2`，新增差异化约束段落（`generation > 0` 条件渲染）
+- 差异化约束中引导 Agent 调 `get-l2-insights`（唯一查询入口），不再引导调 `list-drafts`
 - 修改 `config/pes/draft.yaml`，plan phase 添加 `allowed_tools: ["Bash"]` 和 `max_turns: 3`
 - 确保 `generation` 和 `run_id`、`db_path` 变量在 plan prompt context 中可用
 
@@ -371,24 +349,28 @@ phases:
 - `config/pes/draft.yaml` [MODIFY]
 - `core/pes/draft.py` [MODIFY]（如需补充 prompt context 变量）
 
+**前置依赖**
+
+- Task 3.5（CLI 合并）完成后，prompt 中的 CLI 示例需使用增强后的 `get-l2-insights` 命令格式
+
 **测试通过标准**
 
 - `generation=0` 时不渲染差异化段落
-- `generation>0` 时渲染差异化段落，含正确的 CLI 命令
+- `generation>0` 时渲染差异化段落，含 `get-l2-insights` CLI 命令（非 `list-drafts`）
 - plan phase 的 `allowed_tools` 包含 `"Bash"`
 - plan phase 的 `max_turns` 为 3
 
 ### 5.6 Task 6：端到端验证
 
-**目标**: 在真实场景下验证多次 draft + L2 知识回流 + 差异化生成。
+**目标**: 在真实场景下验证多次 draft + 差异化生成。
 
 **要干什么**
 
 - 配置 `task_stages=[("feature_extract", 1), ("draft", 3)]`
-- 验证第 2、3 次 draft 的 plan 阶段能查到前序 draft 简报
-- 验证 `l2_insights` 表中有条目
+- 验证第 2、3 次 draft 的 plan 阶段能通过 `get-l2-insights` 查到前序 draft 经验
+- 验证 `l2_insights` 表中有条目（= 前序 draft summarize 的索引）
 - 验证后续 draft 的策略与前序明确不同
-- 验证 10+ 次 draft 时 `list-drafts --limit` 截断正常
+- 验证 10+ 次 draft 时 `get-l2-insights --limit` 截断正常
 
 **涉及文件**
 
@@ -429,18 +411,20 @@ phases:
 
 ## 7. 涉及文件汇总
 
-| 文件 | 变更类型 | 说明 |
-|------|----------|------|
-| `config/prompts/templates/draft_summarize.j2` | MODIFY | 固定五小节段落式输出格式 |
-| `config/prompts/templates/draft_plan.j2` | MODIFY | 新增差异化约束段落 |
-| `config/pes/draft.yaml` | MODIFY | plan phase 开放 Bash、max_turns 调整 |
-| `core/pes/draft.py` | MODIFY | L2 写入 + prompt context 补充 |
-| `core/cli/db.py` | MODIFY | 新增 list-drafts / get-draft-detail / get-l2-insights |
-| `core/database/repositories/solution.py` | MODIFY | 新增 list_by_run_and_operation() |
-| `core/prompts/skills/draft-history-review/SKILL.md` | NEW | 历史感知 Skill |
+| 文件 | 变更类型 | 说明 | 状态 |
+|------|----------|------|------|
+| `config/prompts/templates/draft_summarize.j2` | MODIFY | 固定五小节段落式输出格式 | ✅ |
+| `core/pes/draft.py` | MODIFY | L2 写入 | ✅ |
+| `core/cli/db.py` | MODIFY | get-draft-detail / get-l2-insights | ✅（Task 3.5 将删除 list-drafts 并增强 get-l2-insights） |
+| `core/database/repositories/solution.py` | MODIFY | list_by_run_and_operation() | ✅ |
+| `core/cli/db.py` | MODIFY | 删除 list-drafts，增强 get-l2-insights | Task 3.5 待完成 |
+| `core/database/repositories/l2.py` | MODIFY | 增强查询（JOIN solution 信息） | Task 3.5 待完成 |
+| `config/prompts/templates/draft_plan.j2` | MODIFY | 差异化约束（引导调 get-l2-insights） | Task 5 待完成 |
+| `config/pes/draft.yaml` | MODIFY | plan phase 开放 Bash、max_turns 调整 | Task 5 待完成 |
+| `core/prompts/skills/draft-history-review/SKILL.md` | NEW | 历史感知 Skill（唯一入口 get-l2-insights） | Task 4 待完成 |
 
 ---
 
 ## 8. 一句话结论
 
-第二阶段的核心不是让系统"更聪明"，而是让系统"有记忆"——通过固定格式的 Summarize、L2 知识写入、CLI 查询和差异化约束，使 10+ 次 Draft 不再是 10 次独立随机尝试，而是逐步覆盖更大策略空间的有方向探索。
+第二阶段的核心不是让系统"更聪明"，而是让系统"有记忆"——通过固定格式的 Summarize、draft 经验自动沉淀（L2 = draft summarize 的索引/加工视图）、统一的 `get-l2-insights` 查询入口和差异化约束，使 10+ 次 Draft 不再是 10 次独立随机尝试，而是逐步覆盖更大策略空间的有方向探索。
