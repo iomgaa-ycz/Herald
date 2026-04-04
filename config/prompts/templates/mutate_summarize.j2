@@ -1,0 +1,108 @@
+{{ static_fragments_text | default('', true) }}
+
+{% set metric_name = solution.metrics.metric_name if solution and solution.metrics and solution.metrics.metric_name is not none else (task_spec.metric_name if task_spec else "unknown") %}
+{% set metric_value = solution.metrics.metric_value if solution and solution.metrics and solution.metrics.metric_value is not none else "unknown" %}
+{% set metric_direction = solution.metrics.metric_direction if solution and solution.metrics and solution.metrics.metric_direction is not none else (task_spec.metric_direction if task_spec else "unknown") %}
+
+# 当前阶段
+
+你当前处于 `mutate_summarize` phase，需要总结本次变异实验并沉淀洞察。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+{% endif %}
+
+# 角色边界
+
+- `agent` 只影响表达与复盘风格。
+- `solution`、`task_spec`、`execution_log`、指标结果才是总结结论的依据。
+- 不要虚构未观察到的实验事实；推断必须明确标注为推断。
+
+{% if task_spec %}
+# 任务规格
+
+- `task_type`: `{{ task_spec.task_type }}`
+- `competition_name`: `{{ task_spec.competition_name }}`
+- `objective`: `{{ task_spec.objective }}`
+- `metric_name`: `{{ task_spec.metric_name }}`
+- `metric_direction`: `{{ task_spec.metric_direction }}`
+{% endif %}
+
+{% if target_slot %}
+# 变异信息
+
+- 变异 Slot: `{{ target_slot }}`
+{% endif %}
+
+# 方案摘要
+
+## Plan 阶段
+
+{% if solution.plan_summary %}
+{{ solution.plan_summary }}
+{% else %}
+暂无 plan 摘要。
+{% endif %}
+
+## Execute 阶段
+
+{% if solution.execute_summary %}
+{{ solution.execute_summary }}
+{% else %}
+暂无 execute 摘要。
+{% endif %}
+
+# 评估结果
+
+- 指标：`{{ metric_name }}`
+- 本轮指标值：{{ metric_value }}
+- 指标方向：`{{ metric_direction }}`
+- Fitness：{{ solution.fitness if solution and solution.fitness is not none else "unknown" }}
+- 状态：{{ solution.status if solution and solution.status else "unknown" }}
+
+{% if parent_solution and parent_solution.metrics and parent_solution.metrics.metric_value is not none %}
+# 指标对比
+
+- 本轮: {{ metric_value }}
+- 父方案: {{ parent_solution.metrics.metric_value }}
+- 变化: {{ "提升" if (metric_direction == "max" and metric_value > parent_solution.metrics.metric_value) or (metric_direction == "min" and metric_value < parent_solution.metrics.metric_value) else "下降或持平" }}
+{% endif %}
+
+{% if parent_solution %}
+# 父方案参考
+
+- `solution_id`: `{{ parent_solution.id }}`
+- `generation`: `{{ parent_solution.generation }}`
+{% if parent_solution.metrics %}
+- `parent_metric_value`: {{ parent_solution.metrics.metric_value if parent_solution.metrics.metric_value is not none else "unknown" }}
+{% endif %}
+{% endif %}
+
+{% if execution_log %}
+# 执行日志
+
+{{ execution_log }}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 总结要求
+
+请使用 `draft-summarize-format` skill 获取输出格式规范，严格按照五小节段落式结构输出实验总结。
+
+在标准五小节基础上，本次 mutate summarize 需要额外强调：
+- **变异 Slot 标识**：在"# 摘要"中明确指出"本次变异了 {{ target_slot }}"
+- **指标变化方向**：与父方案的 fitness 对比结果
+- **变异有效性判断**：本次变异是正向改进还是负向退化
+- **下一步建议**：基于变异效果，建议下一次应该变异哪个 Slot、为什么
