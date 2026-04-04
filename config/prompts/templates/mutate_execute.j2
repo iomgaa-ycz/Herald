@@ -1,0 +1,143 @@
+{{ static_fragments_text | default('', true) }}
+
+# 当前阶段
+
+你当前处于 `mutate_execute` phase，需要在父方案代码基础上修改一个指定 Slot 的实现。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 角色边界
+
+- `agent` 负责执行风格与调试策略。
+- `task_spec`、`solution`、`workspace` 才是本轮实现的硬约束。
+- 不要把 Agent 提示重写成新的任务目标；若与当前方案冲突，以当前任务上下文为准。
+
+{% if task_spec %}
+# 任务规格
+
+- `task_type`: `{{ task_spec.task_type }}`
+- `competition_name`: `{{ task_spec.competition_name }}`
+- `objective`: `{{ task_spec.objective }}`
+- `metric_name`: `{{ task_spec.metric_name }}`
+- `metric_direction`: `{{ task_spec.metric_direction }}`
+{% endif %}
+
+{% if data_profile %}
+# 数据概况
+
+{{ data_profile }}
+{% endif %}
+
+{% if workspace %}
+# 工作空间
+
+- `workspace_root`: `{{ workspace.workspace_root }}`
+- `data_dir`: `{{ workspace.data_dir }}`
+- `working_dir`: `{{ workspace.working_dir }}`
+- `logs_dir`: `{{ workspace.logs_dir }}`
+- `db_path`: `{{ workspace.db_path }}`
+- `run_log_path`: `{{ workspace.run_log_path }}`
+{% endif %}
+
+{% if target_slot %}
+# 变异目标
+
+- **目标 Slot**: `{{ target_slot }}`
+- 你只需修改 `# === GENE:{{ target_slot }}_START ===` 和 `# === GENE:{{ target_slot }}_END ===` 之间的代码
+- **其余所有代码必须保持与 `solution_parent.py` 完全一致**
+{% endif %}
+
+{% if solution.plan_summary %}
+# 当前方案的 Plan 摘要（含变异决策）
+
+{{ solution.plan_summary }}
+{% endif %}
+
+{% if recent_error %}
+# 最近错误
+
+{{ recent_error }}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 可用工具
+
+- 基础库: numpy, pandas, scipy
+- 机器学习: scikit-learn, xgboost, lightgbm
+- 深度学习: torch, torchvision, timm
+- 优化: optuna
+- 推荐优先使用 PyTorch 进行深度学习任务
+
+# 执行步骤
+
+你必须按以下编号顺序完成所有步骤，**不得跳过任何步骤**。
+
+## Step 1: 阅读父方案代码
+
+- 读取 `{{ workspace.working_dir if workspace else "." }}/solution_parent.py`
+- 定位目标 Slot `{{ target_slot }}` 的 `GENE:{{ target_slot }}_START` / `GENE:{{ target_slot }}_END` 标记区域
+- 理解该 Slot 与其余 Slot 的数据依赖关系
+
+## Step 2: 编写 solution.py
+
+- 复制 `solution_parent.py` 为 `solution.py`
+- **只修改** `# === GENE:{{ target_slot }}_START ===` 和 `# === GENE:{{ target_slot }}_END ===` 之间的代码
+- **严禁修改** 其余 GENE 区域和 FIXED 区域
+- 确保修改后的代码与上下游 Slot 接口兼容
+- **禁止修改 `solution_parent.py`**
+
+## Step 3: 执行 solution.py（禁止跳过）
+
+```bash
+set -o pipefail; python -u solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}
+```
+
+等待运行完成，记录输出中的评估指标值。
+
+## Step 4: 检查与修正
+
+- 若 Step 3 运行失败，**必须修复 solution.py 中目标 Slot 区域的代码后重新执行 Step 3**
+- 若运行成功但指标值异常，修复后重新执行
+- 确认 submission.csv 存在且行数正确
+- 确认验证集指标值合理
+
+## Step 5: 变异纯度检查
+
+- 使用 `mutate-diff-check` skill 对比 `solution_parent.py` 与 `solution.py` 的差异
+- 确认只有目标 Slot 区域有变化
+
+# 输出格式
+
+请严格按以下结构输出：
+
+## 执行报告
+（1-3 段：实际修改内容、修改理由、与父方案的差异）
+
+## 变异 Slot
+- 目标 Slot: {{ target_slot }}
+- 修改摘要: （简述改了什么）
+
+## 验证结果（必须来自 Step 3 的实际运行输出，禁止估算）
+- 指标名: {{ task_spec.metric_name if task_spec else "unknown" }}
+- 指标值: （填写 Step 3 实际输出的数值）
+- 提交路径: {{ workspace.working_dir if workspace else "." }}/submission.csv
