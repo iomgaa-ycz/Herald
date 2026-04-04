@@ -54,6 +54,7 @@ class Scheduler:
         self._current_stage_outputs: list[dict[str, Any]] = []
         self._last_task_status: str | None = None
         self.shared_context: dict[str, Any] = {}
+        self._db: object | None = None
 
     def run(self) -> None:
         """主入口，阻塞直到所有任务完成。"""
@@ -173,6 +174,15 @@ class Scheduler:
             **self.shared_context,
         }
 
+        # mutate 阶段需要注入 parent
+        if task_name == "mutate":
+            parent_id = self._select_best_parent_id()
+            if parent_id is not None:
+                context["parent_solution_id"] = parent_id
+                logger.info("mutate 阶段选择 parent: %s", parent_id)
+            else:
+                logger.warning("mutate 阶段未找到可用 parent，将以无 parent 模式运行")
+
         EventBus.get().emit(
             TaskDispatchEvent(
                 task_name=task_name,
@@ -226,6 +236,40 @@ class Scheduler:
 
         if self._current_task_event:
             self._current_task_event.set()
+
+    def set_db(self, db: object) -> None:
+        """注入数据库引用，用于 parent 选择。"""
+        self._db = db
+
+    def _select_best_parent_id(self) -> str | None:
+        """选择 fitness 最高的 completed solution 作为 parent。
+
+        Returns:
+            最优 solution 的 ID，无可用 solution 时返回 None
+        """
+
+        if self._db is None or not hasattr(self._db, "solutions"):
+            return None
+
+        run_id = self.context.get("run_id")
+        best_fitness_fn = getattr(self._db, "get_best_fitness", None)
+        if not callable(best_fitness_fn):
+            return None
+
+        best = best_fitness_fn(run_id=run_id)
+        if best is None:
+            return None
+
+        solutions_repo = getattr(self._db, "solutions", None)
+        if solutions_repo is None or not hasattr(solutions_repo, "list_active"):
+            return None
+
+        active_solutions = solutions_repo.list_active()
+        for sol in active_solutions:
+            if sol.get("fitness") == best:
+                if run_id is None or sol.get("run_id") == run_id:
+                    return sol["id"]
+        return None
 
     def _merge_stage_outputs(self) -> None:
         """合并当前 stage 产出到共享上下文。"""

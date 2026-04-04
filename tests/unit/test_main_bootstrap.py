@@ -258,6 +258,7 @@ class _StubScheduler:
         agent_name: str = "kaggle_master",
         context: dict[str, Any] | None = None,
         task_stages: list[tuple[str, int]] | None = None,
+        stage_max_retries: dict[str, int] | None = None,
     ) -> None:
         self.competition_dir = competition_dir
         self.max_tasks = max_tasks
@@ -265,8 +266,12 @@ class _StubScheduler:
         self.agent_name = agent_name
         self.context = context or {}
         self.task_stages = task_stages
+        self.stage_max_retries = stage_max_retries or {}
         self.run_called = False
         _StubScheduler.last_instance = self
+
+    def set_db(self, db: object) -> None:
+        """接受数据库引用注入（stub 不实际使用）。"""
 
     def _resolve_task_stages(self) -> list[tuple[str, int]]:
         """返回 stage 配置，兼容 main 中的日志调用。"""
@@ -347,6 +352,19 @@ def test_main_injects_shared_run_id_into_runtime_context(
         ]
     )
 
+    def _stub_bootstrap_mutate_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        pes = _StubPES(
+            instance_id="mutate-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+        captured_pes["mutate"] = pes
+        return pes
+
     monkeypatch.setattr(main_module, "ConfigManager", _StubConfigManager)
     monkeypatch.setattr(
         main_module,
@@ -358,6 +376,11 @@ def test_main_injects_shared_run_id_into_runtime_context(
         "bootstrap_draft_pes",
         _stub_bootstrap_draft_pes,
     )
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_mutate_pes",
+        _stub_bootstrap_mutate_pes,
+    )
     monkeypatch.setattr(main_module, "Scheduler", _StubScheduler)
     monkeypatch.setattr(main_module, "setup_task_dispatcher", lambda: None)
     monkeypatch.setattr(main_module, "create_run_id", lambda: "run-001")
@@ -367,6 +390,7 @@ def test_main_injects_shared_run_id_into_runtime_context(
 
     assert captured_pes["feature_extract"].runtime_context["run_id"] == "run-001"
     assert captured_pes["draft"].runtime_context["run_id"] == "run-001"
+    assert captured_pes["mutate"].runtime_context["run_id"] == "run-001"
     assert _StubScheduler.last_instance is not None
     assert _StubScheduler.last_instance.context["run_id"] == "run-001"
     assert _StubScheduler.last_instance.run_called is True
@@ -455,6 +479,17 @@ def test_main_exposes_project_skills_when_present(
         ]
     )
 
+    def _stub_bootstrap_mutate_pes(
+        config: HeraldConfig,
+        workspace: Workspace,
+        db: HeraldDB,
+    ) -> _StubPES:
+        del config, db
+        return _StubPES(
+            instance_id="mutate-pes",
+            runtime_context={"competition_dir": str(workspace.data_dir.parent)},
+        )
+
     monkeypatch.setattr(main_module, "ConfigManager", _StubConfigManager)
     monkeypatch.setattr(
         main_module,
@@ -465,6 +500,11 @@ def test_main_exposes_project_skills_when_present(
         main_module,
         "bootstrap_draft_pes",
         _stub_bootstrap_draft_pes,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_mutate_pes",
+        _stub_bootstrap_mutate_pes,
     )
     monkeypatch.setattr(main_module, "Scheduler", _StubScheduler)
     monkeypatch.setattr(main_module, "setup_task_dispatcher", lambda: None)

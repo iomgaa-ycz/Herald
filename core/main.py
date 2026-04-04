@@ -16,6 +16,7 @@ from core.events import EventBus, setup_task_dispatcher
 from core.load_config import ConfigManager
 from core.pes import load_pes_config
 from core.pes.draft import DraftPES
+from core.pes.mutate import MutatePES
 from core.pes.feature_extract import FeatureExtractPES
 from core.scheduler import Scheduler
 from core.utils.utils import create_run_id, utc_now_iso
@@ -124,6 +125,44 @@ def bootstrap_draft_pes(
     return draft_pes
 
 
+def bootstrap_mutate_pes(
+    config: HeraldConfig,
+    workspace: Workspace,
+    db: HeraldDB,
+) -> MutatePES:
+    """装配并注册 MutatePES 实例。"""
+
+    pes_config_path = (
+        Path(__file__).resolve().parents[1] / "config" / "pes" / "mutate.yaml"
+    )
+    pes_config = load_pes_config(pes_config_path)
+    competition_root_dir = str(Path(config.run.competition_dir).expanduser().resolve())
+    mutate_pes = MutatePES(
+        config=pes_config,
+        llm=_build_llm_client(config),
+        db=db,
+        workspace=workspace,
+        runtime_context={
+            "competition_dir": config.run.competition_dir,
+            "competition_root_dir": competition_root_dir,
+            "competition_id": Path(competition_root_dir).name,
+            "public_data_dir": str(workspace.data_dir),
+            "workspace_logs_dir": str(workspace.logs_dir),
+        },
+    )
+    create_grading_hook = _load_create_grading_hook()
+    mutate_pes.hooks.register(
+        create_grading_hook(
+            competition_root_dir=competition_root_dir,
+            public_data_dir=str(workspace.data_dir),
+            workspace_logs_dir=str(workspace.logs_dir),
+        ),
+        name=f"{mutate_pes.instance_id}_grading_hook",
+    )
+    logger.info("MutatePES 装配完成: instance_id=%s", mutate_pes.instance_id)
+    return mutate_pes
+
+
 def build_run_metadata(
     config: HeraldConfig,
     workspace: Workspace,
@@ -196,7 +235,7 @@ def main() -> None:
     metadata_path = workspace.write_run_metadata(metadata)
     logger.info("run 元数据已写入: %s", metadata_path)
 
-    # Phase 5: 装配 FeatureExtractPES + DraftPES
+    # Phase 5: 装配 FeatureExtractPES + DraftPES + MutatePES
     feature_extract_pes = bootstrap_feature_extract_pes(
         config=config,
         workspace=workspace,
@@ -207,12 +246,19 @@ def main() -> None:
         workspace=workspace,
         db=db,
     )
+    mutate_pes = bootstrap_mutate_pes(
+        config=config,
+        workspace=workspace,
+        db=db,
+    )
     feature_extract_pes.runtime_context["run_id"] = run_id
     draft_pes.runtime_context["run_id"] = run_id
+    mutate_pes.runtime_context["run_id"] = run_id
     logger.info(
-        "PES 已注册到调度链路: feature_extract=%s, draft=%s",
+        "PES 已注册到调度链路: feature_extract=%s, draft=%s, mutate=%s",
         feature_extract_pes.instance_id,
         draft_pes.instance_id,
+        mutate_pes.instance_id,
     )
 
     # Phase 6: 启动调度器
@@ -223,9 +269,11 @@ def main() -> None:
         task_stages=[
             ("feature_extract", 1),
             ("draft", config.run.max_tasks),
+            ("mutate", config.run.max_tasks),
         ],
         stage_max_retries={"feature_extract": 2},
     )
+    scheduler.set_db(db)
     logger.info("调度器已启动: task_stages=%s", scheduler._resolve_task_stages())
     try:
         scheduler.run()
