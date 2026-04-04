@@ -111,25 +111,37 @@
 - 优化: optuna
 - 推荐优先使用 PyTorch 进行深度学习任务
 
-# 执行要求
+# 执行步骤
 
-- 把描述态方案真正实现为完整、可运行、可验证的代码，不要只输出伪代码或待办列表。
-- 先保证 MVP baseline 跑通，再做必要优化。
-- 所有实现必须围绕锁定指标展开，优先服务于 `metric_name` / `metric_direction`。
-- 若存在最近错误，先定位并解除阻塞，再继续推进剩余实现。
-- 优先在 `working_dir` 中完成实现与调试；生成的工件应与当前工作空间结构兼容。
-- 若 gene 描述与 plan 摘要存在不一致，以更具体、更新的方案为准，并在最终总结中说明取舍。
-- 可以使用当前 phase 提供的工具，但不要修改与本任务无关的全局基础设施。
-- 必须结合 `data_profile` 选择合适的数据读取、缺失值处理、特征编码与验证策略，不要忽略上游数据分析结论。必须按 data_profile §6（运行环境）和 §7（训练建议）设置 n_jobs、GPU、验证折数等资源参数，禁止使用 n_jobs=-1。
+你必须按以下编号顺序完成所有步骤，**不得跳过任何步骤**。
+若存在最近错误，先定位并解除阻塞，再继续推进。
 
-## 代码要求
+## Step 1: 编写 solution.py
 
-- 代码必须完整、自包含、可直接运行
+- 把描述态方案实现为完整、自包含、可直接运行的代码，写入 `{{ workspace.working_dir if workspace else "." }}/solution.py`
+- 先保证 MVP baseline 跑通，再做必要优化
+- 所有实现围绕 `{{ task_spec.metric_name if task_spec else "unknown" }}` ({{ task_spec.metric_direction if task_spec else "maximize" }}) 展开
+- 必须结合上方 `data_profile` 选择合适的数据读取、缺失值处理、特征编码与验证策略；必须按 §6/§7 设置资源参数，禁止 n_jobs=-1
 - 必须在验证集上计算并打印评估指标
-- 必须将测试集预测结果保存为 submission.csv
-- 代码应在规定时间内运行完成
-- 运行 solution.py 时，必须使用以下命令将输出同时保存到日志文件，方便人类实时观察训练进度:
-  `set -o pipefail; python -u solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}`
+- 必须将测试集预测结果保存为 `submission.csv`
+- 若 gene 描述与 plan 摘要存在不一致，以更具体、更新的方案为准
+
+## Step 2: 执行 solution.py（禁止跳过）
+
+使用以下命令运行，将输出同时保存到日志文件：
+
+```bash
+set -o pipefail; python -u solution.py 2>&1 | tee -a {{ workspace.run_log_path if workspace else "run.log" }}
+```
+
+等待运行完成，记录输出中的评估指标值。
+
+## Step 3: 检查与修正
+
+- 若 Step 2 运行失败（语法错误、ImportError、文件路径错误、数据类型不匹配等），**必须修复代码后重新执行 Step 2**
+- 若运行成功但未生成 submission.csv 或指标值异常，修复后重新执行
+- 确认 submission.csv 存在且行数与测试集匹配
+- 确认验证集指标值合理（非 NaN、非零、在合理范围内）
 
 # 输出格式
 
@@ -144,7 +156,7 @@
 # 必须保存预测结果到指定路径
 ```
 
-## 验证结果
+## 验证结果（必须来自 Step 2 的实际运行输出，禁止估算）
 - 指标名: {{ task_spec.metric_name if task_spec else "unknown" }}
-- 指标值: X.XX
+- 指标值: （填写 Step 2 实际输出的数值）
 - 提交路径: {{ workspace.working_dir if workspace else "." }}/submission.csv
