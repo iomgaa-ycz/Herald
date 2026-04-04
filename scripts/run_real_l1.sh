@@ -3,31 +3,35 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SETTINGS_FILE="${PROJECT_ROOT}/.claude/settings.local.json"
 
 cd "${PROJECT_ROOT}"
 
-# 清空 workspace 目录
+# === 可配置参数（通过环境变量覆盖）===
+COMPETITION_DIR="${HERALD_COMPETITION_DIR:-${HOME}/.cache/mle-bench/data/tabular-playground-series-may-2022}"
+LLM_MODEL="${HERALD_LLM_MODEL:-claude-sonnet-4-6}"
+MAX_TASKS="${HERALD_MAX_TASKS:-3}"
+
+# === 清空 workspace ===
 WORKSPACE_DIR="${HERALD_WORKSPACE_DIR:-${PROJECT_ROOT}/workspace}"
 if [ -d "${WORKSPACE_DIR}" ]; then
   echo "清空 workspace: ${WORKSPACE_DIR}"
   rm -rf "${WORKSPACE_DIR}"
 fi
 
-eval "$(
-python - <<'PY'
-import json
-import shlex
-from pathlib import Path
+# === 加载 .env ===
+if [ -f "${PROJECT_ROOT}/.env" ]; then
+  set -a
+  source "${PROJECT_ROOT}/.env"
+  set +a
+fi
 
-settings_path = Path(".claude/settings.local.json")
-payload = json.loads(settings_path.read_text(encoding="utf-8"))
-for key, value in payload.get("env", {}).items():
-    print(f"export {key}={shlex.quote(str(value))}")
-PY
-)"
+# === 运行 ===
+echo "竞赛: ${COMPETITION_DIR}"
+echo "模型: ${LLM_MODEL}"
+echo "draft 数: ${MAX_TASKS}"
+echo "---"
 
-conda run -n herald python -m core.main \
-  --run_competition_dir "${HOME}/.cache/mle-bench/data/tabular-playground-series-may-2022" \
-  --llm_model claude-opus-4-6 \
-  --run_max_tasks 1
+PYTHONPATH="${PROJECT_ROOT}" conda run -n herald python core/main.py \
+  --run_competition_dir "${COMPETITION_DIR}" \
+  --llm_model "${LLM_MODEL}" \
+  --run_max_tasks "${MAX_TASKS}"
