@@ -1,0 +1,26 @@
+name: mutate
+operation: mutate
+solution_file_name: solution.py
+submission_file_name: submission.csv
+
+phases:
+  plan:
+    template_name: null
+    tool_names: []
+    max_retries: 1
+    allowed_tools: ["Bash", "Read", "Glob", "Grep", "Skill"]
+    max_turns: 3
+
+  execute:
+    template_name: null
+    tool_names: ["db_cli"]
+    max_retries: 1
+    allowed_tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill"]
+    max_turns: 12
+
+  summarize:
+    template_name: null
+    tool_names: []
+    max_retries: 1
+    allowed_tools: ["Skill"]
+    max_turns: 2

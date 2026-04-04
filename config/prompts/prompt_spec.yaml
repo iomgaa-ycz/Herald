@@ -38,3 +38,21 @@ templates:
     required_context: ["solution", "execution_log"]
     static_fragments: ["system_context"]
     artifacts: []
+
+  # Mutate 操作 - Plan 阶段
+  mutate_plan:
+    required_context: ["solution", "parent_solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  # Mutate 操作 - Execute 阶段
+  mutate_execute:
+    required_context: ["solution", "parent_solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
+
+  # Mutate 操作 - Summarize 阶段
+  mutate_summarize:
+    required_context: ["solution", "execution_log", "parent_solution"]
+    static_fragments: ["system_context"]
+    artifacts: []
