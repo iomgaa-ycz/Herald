@@ -7,3 +7,4 @@ workspace/
 herald.db
 .claude/skills
 .env
+cache/
