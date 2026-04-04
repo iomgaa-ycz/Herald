@@ -479,7 +479,7 @@ def test_draft_pes_run_with_real_prompt_manager(tmp_path: Path) -> None:
 
     assert solution.status == "completed"
     assert solution.plan_summary == "ok"
-    assert "python solution.py" in solution.execute_summary
+    assert "artifact-based-validation" in solution.execute_summary
     assert "exit_code=0" in solution.execute_summary
     assert solution.summarize_insight == "ok"
     assert set(solution.phase_outputs.keys()) == {"plan", "execute", "summarize"}

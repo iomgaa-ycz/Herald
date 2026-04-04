@@ -274,7 +274,7 @@ def test_missing_submission_skips_without_breaking_run(
         name="grading-hook",
     )
 
-    with pytest.raises(ValueError, match="submission 文件不存在"):
+    with pytest.raises(ValueError, match="未找到 submission.csv"):
         asyncio.run(pes.run(agent_profile=_build_agent_profile(), generation=0))
 
     assert called["count"] == 0

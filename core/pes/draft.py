@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shlex
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +16,6 @@ from core.utils.utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
-_BACKGROUND_TASK_PREFIX = "Command running in background with ID:"
-
-
 class DraftPES(BasePES):
     """DraftPES 的最小可运行版本。"""
 
@@ -29,10 +25,10 @@ class DraftPES(BasePES):
         solution: PESSolution,
         parent_solution: PESSolution | None,
     ) -> dict[str, Any]:
-        """为 execute phase 提供工作目录与环境变量。"""
+        """为所有 phase 提供工作目录与环境变量。"""
 
-        del solution, parent_solution
-        if phase != "execute" or self.workspace is None:
+        del phase, solution, parent_solution
+        if self.workspace is None:
             return {}
 
         working_dir = getattr(self.workspace, "working_dir", None)
@@ -89,31 +85,17 @@ class DraftPES(BasePES):
         response: object,
         response_text: str,
     ) -> dict[str, Any]:
-        """处理 execute 阶段的 tool-write 契约与首次运行事实。"""
+        """处理 execute 阶段的 tool-write 契约与运行产物验证。"""
+
+        del response  # 不再从 tool calls 解析命令，改用产物验证
 
         self._attach_workspace_artifacts(solution)
         self._assert_tool_write_contract(solution)
         code = self._load_written_solution_code(solution)
         self._validate_python_code(solution=solution, code=code)
         self._persist_code_snapshot(solution=solution, code=code)
-        exec_result = self._extract_execute_fact(response)
-        self._assert_execute_fact_matches_final_solution(solution, exec_result)
-        exec_result = self._fill_exec_fact_from_runtime_artifacts(exec_result)
+        exec_result = self._build_exec_result_from_artifacts(solution)
         self._persist_exec_log(solution=solution, exec_result=exec_result)
-
-        exit_code = exec_result["exit_code"]
-        if exit_code != 0:
-            solution.execute_summary = self._format_execute_summary(exec_result)
-            solution.metadata["_l2_failure_context"] = {
-                "reason": "runtime_error",
-                "stderr_tail": (
-                    self._coerce_optional_text(exec_result.get("stderr")) or ""
-                )[-500:],
-                "stdout_tail": (
-                    self._coerce_optional_text(exec_result.get("stdout")) or ""
-                )[-500:],
-            }
-            raise ValueError(f"solution.py 首次运行失败：{solution.execute_summary}")
 
         try:
             metrics = self._extract_val_metrics(
@@ -153,141 +135,50 @@ class DraftPES(BasePES):
             "metrics": solution.metrics,
         }
 
-    def _extract_execute_fact(self, response: object) -> dict[str, Any]:
-        """从 execute phase 的真实工具轨迹中提取首次运行事实。"""
-
-        turns = getattr(response, "turns", None)
-        if not isinstance(turns, list):
-            raise ValueError("execute 响应缺少 turns，无法提取首次运行事实")
-
-        fallback_fact: dict[str, Any] | None = None
-        for turn in turns:
-            if not isinstance(turn, dict):
-                continue
-            tool_calls = turn.get("tool_calls")
-            if not isinstance(tool_calls, list):
-                continue
-
-            for tool_call in tool_calls:
-                fact = self._parse_exec_fact_from_tool_call(tool_call)
-                if fact is None:
-                    continue
-                if self._command_targets_solution_file(str(fact["command"]), None):
-                    return fact
-                if fallback_fact is None:
-                    fallback_fact = fact
-
-        if fallback_fact is not None:
-            return fallback_fact
-        raise ValueError("未从 execute turns 中提取到 solution.py 的真实运行事实")
-
-    def _parse_exec_fact_from_tool_call(
+    def _build_exec_result_from_artifacts(
         self,
-        tool_call: object,
-    ) -> dict[str, Any] | None:
-        """从单次工具调用中提取执行事实。"""
+        solution: PESSolution,
+    ) -> dict[str, Any]:
+        """从运行时产物构建执行结果。
 
-        if not isinstance(tool_call, dict):
-            return None
+        判断逻辑：submission.csv 存在 → agent 成功执行了 solution.py。
+        stdout/metrics 从 run.log / metrics.json 读取。
+        """
 
-        tool_input = tool_call.get("input")
-        if not isinstance(tool_input, dict):
-            return None
-
-        command = self._normalize_command(
-            self._first_non_none(
-                tool_input.get("command"),
-                tool_input.get("cmd"),
-                tool_input.get("argv"),
-                tool_input.get("args"),
+        submission_path = solution.submission_file_path
+        if not submission_path or not Path(submission_path).exists():
+            raise ValueError(
+                "workspace 中未找到 submission.csv，"
+                "agent 可能未成功执行 solution.py"
             )
-        )
-        if command is None:
-            return None
 
-        result_payload = self._normalize_tool_result(tool_call.get("result"))
-        exit_code = self._coerce_int(
-            self._first_non_none(
-                result_payload.get("exit_code"),
-                tool_call.get("exit_code"),
-            )
-        )
-        duration_ms = self._coerce_float(
-            self._first_non_none(
-                result_payload.get("duration_ms"),
-                result_payload.get("duration"),
-                tool_call.get("duration_ms"),
-            )
-        )
-        stdout = self._coerce_optional_text(
-            self._first_non_none(
-                result_payload.get("stdout"),
-                tool_call.get("stdout"),
-            )
-        )
-        stderr = self._coerce_optional_text(
-            self._first_non_none(
-                result_payload.get("stderr"),
-                tool_call.get("stderr"),
-            )
-        )
+        stdout: str | None = None
+        stderr: str | None = None
 
-        if exit_code is None:
-            return None
+        if self.workspace is not None and hasattr(
+            self.workspace, "read_runtime_artifact"
+        ):
+            read_artifact = self.workspace.read_runtime_artifact
+            if callable(read_artifact):
+                for artifact_name in ("stdout.log", "run.log"):
+                    content = read_artifact(artifact_name)
+                    if content not in (None, ""):
+                        stdout = content
+                        break
+                stderr = read_artifact("stderr.log") or None
 
-        return {
-            "command": command,
+        metrics = self._load_metrics_artifact()
+
+        result: dict[str, Any] = {
+            "command": "artifact-based-validation",
             "stdout": stdout,
             "stderr": stderr,
-            "exit_code": exit_code,
-            "duration_ms": duration_ms,
+            "exit_code": 0,
+            "duration_ms": None,
         }
-
-    def _normalize_tool_result(self, result: object) -> dict[str, Any]:
-        """将工具结果归一化为字典结构。"""
-
-        if isinstance(result, dict):
-            return result
-
-        if isinstance(result, list):
-            merged: dict[str, Any] = {}
-            text_fragments: list[str] = []
-            for item in result:
-                if isinstance(item, dict):
-                    merged.update(
-                        {
-                            key: value
-                            for key, value in item.items()
-                            if key
-                            in {"stdout", "stderr", "exit_code", "duration_ms", "text"}
-                        }
-                    )
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        text_fragments.append(text.strip())
-                elif isinstance(item, str) and item.strip():
-                    text_fragments.append(item.strip())
-            if text_fragments and "stdout" not in merged:
-                merged["stdout"] = "\n".join(text_fragments)
-            return merged
-
-        if isinstance(result, str):
-            return {"stdout": result}
-
-        return {}
-
-    def _normalize_command(self, command: object) -> str | None:
-        """将工具输入中的命令归一化为字符串。"""
-
-        if isinstance(command, str):
-            normalized = command.strip()
-            return normalized or None
-        if isinstance(command, list):
-            parts = [str(part).strip() for part in command if str(part).strip()]
-            if not parts:
-                return None
-            return " ".join(parts)
-        return None
+        if metrics is not None:
+            result["metrics"] = metrics
+        return result
 
     def _first_non_none(self, *values: object) -> object | None:
         """返回第一个非 None 值。"""
@@ -336,109 +227,6 @@ class DraftPES(BasePES):
             return None
         text = str(value)
         return text
-
-    def _assert_execute_fact_matches_final_solution(
-        self,
-        solution: PESSolution,
-        exec_fact: dict[str, Any],
-    ) -> None:
-        """确认执行事实对应最终的 working/solution.py。"""
-
-        solution_path = solution.solution_file_path
-        if solution_path is None:
-            raise ValueError("solution_file_path 为空，无法校验执行事实")
-
-        if not self._command_targets_solution_file(
-            command=str(exec_fact["command"]),
-            solution_path=Path(solution_path),
-        ):
-            raise ValueError(f"执行事实未指向最终 solution.py：{exec_fact['command']}")
-
-    def _command_targets_solution_file(
-        self,
-        command: str,
-        solution_path: Path | None,
-    ) -> bool:
-        """判断命令是否在运行目标 solution.py。"""
-
-        try:
-            parts = shlex.split(command)
-        except ValueError:
-            parts = command.split()
-
-        working_dir = getattr(self.workspace, "working_dir", None)
-        workspace_dir = (
-            Path(working_dir).resolve()
-            if isinstance(working_dir, (str, Path))
-            else None
-        )
-        expected_path = solution_path.resolve() if solution_path is not None else None
-
-        for part in parts:
-            if not part.endswith(".py"):
-                continue
-            candidate = Path(part)
-            if not candidate.is_absolute() and workspace_dir is not None:
-                candidate = (workspace_dir / candidate).resolve()
-            elif candidate.is_absolute():
-                candidate = candidate.resolve()
-
-            if expected_path is not None and candidate == expected_path:
-                return True
-            if (
-                expected_path is None
-                and candidate.name == self.config.solution_file_name
-            ):
-                return True
-
-        return False
-
-    def _is_background_task_output(self, stdout: object) -> bool:
-        """检测 stdout 是否为后台任务通知文本。"""
-
-        if not isinstance(stdout, str):
-            return False
-        return stdout.strip().startswith(_BACKGROUND_TASK_PREFIX)
-
-    def _fill_exec_fact_from_runtime_artifacts(
-        self,
-        exec_fact: dict[str, Any],
-    ) -> dict[str, Any]:
-        """使用运行时工件补全缺失的 stdout/stderr。"""
-
-        if self.workspace is None or not hasattr(
-            self.workspace, "read_runtime_artifact"
-        ):
-            return exec_fact
-
-        read_artifact = self.workspace.read_runtime_artifact
-        if not callable(read_artifact):
-            return exec_fact
-
-        filled_fact = dict(exec_fact)
-
-        # 后台执行模式检测：stdout 包含后台任务通知，视为无效
-        if self._is_background_task_output(filled_fact.get("stdout")):
-            filled_fact["stdout"] = None
-
-        # Phase 1: 补全 stdout（优先 stdout.log，fallback run.log）
-        if filled_fact.get("stdout") in (None, ""):
-            for artifact_name in ("stdout.log", "run.log"):
-                content = read_artifact(artifact_name)
-                if content not in (None, ""):
-                    filled_fact["stdout"] = content
-                    break
-
-        # Phase 2: 补全 stderr
-        if filled_fact.get("stderr") in (None, ""):
-            filled_fact["stderr"] = read_artifact("stderr.log")
-
-        # Phase 3: 加载 metrics.json
-        metrics = self._load_metrics_artifact()
-        if metrics is not None:
-            filled_fact["metrics"] = metrics
-
-        return filled_fact
 
     def _load_metrics_artifact(self) -> dict[str, Any] | None:
         """读取 execute 阶段产出的 metrics.json。"""

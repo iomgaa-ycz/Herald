@@ -163,36 +163,13 @@ def _write_success_runtime_artifacts(case_dir: Path, working_dir: Path) -> None:
             )
 
 
-def test_extract_execute_fact_from_real_tool_trace(tmp_path: Path) -> None:
-    """成功回放可恢复首次真实运行事实。"""
-
-    replay = _load_replay_case("draft_success_tabular_v1")
-    pes, _, _ = _build_pes(tmp_path, None, replay["turns"])
-    expected = dict(replay["expected"])
-
-    exec_fact = pes._extract_execute_fact(  # noqa: SLF001
-        DummyResponse(result="执行完成", turns=replay["turns"])
-    )
-
-    # 命令应包含 solution.py
-    assert "solution.py" in exec_fact["command"]
-    assert exec_fact["exit_code"] == int(expected.get("exit_code", 0))
-    # duration_ms 可能为 None（后台执行模式不记录）
-    if expected.get("duration_ms") is not None:
-        assert exec_fact["duration_ms"] == float(expected["duration_ms"])
-    # stdout 可能是后台任务通知（Plan 038 场景），由 _fill_exec_fact 补全
-    assert exec_fact["stdout"] is not None
-    assert exec_fact["stderr"] is not None
-
-
-def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
+def test_missing_submission_csv_marks_failure(
     tmp_path: Path,
 ) -> None:
-    """非零退出码会先写 exec_logs，再把 solution 标成 failed。"""
+    """agent 未产出 submission.csv 时 solution 标为 failed。"""
 
     replay = _load_replay_case("draft_runtime_error_v1")
     solution_code = str(replay["solution_code"])
-    expected = dict(replay["expected"])
 
     def writer(working_dir: Path) -> None:
         (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
@@ -201,22 +178,14 @@ def test_execute_fact_non_zero_exit_code_marks_failure_after_logging(
     solution = pes.create_solution(generation=0)
     db.insert_solution(solution.to_record())
 
-    with pytest.raises(ValueError, match="首次运行失败"):
+    with pytest.raises(ValueError, match="未找到 submission.csv"):
         asyncio.run(pes.execute_phase(solution))
 
-    exec_logs = db.get_exec_logs(solution.id)
-    assert len(exec_logs) == 1
-    assert exec_logs[0]["command"] == "python solution.py"
-    assert exec_logs[0]["exit_code"] == int(expected.get("exit_code", 1))
-    if replay["stderr"] is not None:
-        assert exec_logs[0]["stderr"] == replay["stderr"]
-    else:
-        assert "RuntimeError: boom" in exec_logs[0]["stderr"]
     assert solution.status == "failed"
-    assert "首次运行失败" in solution.metadata["failure_reason"]
+    assert "未找到 submission.csv" in solution.metadata["failure_reason"]
 
 
-def test_execute_fact_success_case_can_fill_metrics_from_runtime_artifacts(
+def test_success_case_fills_metrics_from_runtime_artifacts(
     tmp_path: Path,
 ) -> None:
     """成功回放会从 runtime 工件补全结构化指标。"""

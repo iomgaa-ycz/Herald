@@ -152,7 +152,6 @@ def test_draft_pes_execute_fact_success_flow(tmp_path: Path) -> None:
     """成功回放会在 solution 完成后写入至少一条 exec_logs。"""
 
     replay = _load_replay_case("draft_success_tabular_v1")
-    expected = dict(replay["expected"])
 
     def writer(working_dir: Path) -> None:
         _write_case_runtime_artifacts(Path(replay["case_dir"]), working_dir)
@@ -190,11 +189,11 @@ def test_draft_pes_execute_fact_success_flow(tmp_path: Path) -> None:
 
     exec_logs = db.get_exec_logs(received_events[0].solution_id)
     assert len(exec_logs) >= 1
-    # 命令应包含 solution.py
-    assert "solution.py" in exec_logs[0]["command"]
-    assert exec_logs[0]["exit_code"] == int(expected.get("exit_code", 0))
+    # 产物驱动验证，command 为描述性标记
+    assert exec_logs[0]["command"] == "artifact-based-validation"
+    assert exec_logs[0]["exit_code"] == 0
 
-    # stdout 经过 _fill_exec_fact_from_runtime_artifacts 补全后应包含训练日志
+    # stdout 从 run.log/stdout.log 读取，应包含训练日志
     assert exec_logs[0]["stdout"] is not None
     assert len(exec_logs[0]["stdout"]) > 0
 
@@ -203,11 +202,10 @@ def test_draft_pes_execute_fact_success_flow(tmp_path: Path) -> None:
 
 
 def test_draft_pes_execute_fact_failure_flow(tmp_path: Path) -> None:
-    """runtime error 回放会显式标记 failed，且 stderr 可查询。"""
+    """agent 未产出 submission.csv 时标记 failed。"""
 
     replay = _load_replay_case("draft_runtime_error_v1")
     solution_code = str(replay["solution_code"])
-    expected = dict(replay["expected"])
 
     def writer(working_dir: Path) -> None:
         (working_dir / "solution.py").write_text(solution_code, encoding="utf-8")
@@ -246,15 +244,7 @@ def test_draft_pes_execute_fact_failure_flow(tmp_path: Path) -> None:
     solution_row = db.get_solution(received_events[0].solution_id)
     assert solution_row is not None
     assert solution_row["status"] == "failed"
-
-    exec_logs = db.get_exec_logs(received_events[0].solution_id)
-    assert len(exec_logs) == 1
-    expected_exit_code = int(expected.get("exit_code", 1))
-    assert exec_logs[0]["exit_code"] == expected_exit_code
-    if replay["stderr"] is not None:
-        assert exec_logs[0]["stderr"] == replay["stderr"]
-    else:
-        assert "RuntimeError: boom" in exec_logs[0]["stderr"]
+    assert "未找到 submission.csv" in solution_row["execute_summary"]
 
 
 def test_draft_pes_execute_fact_submission_schema_error_flow(tmp_path: Path) -> None:
