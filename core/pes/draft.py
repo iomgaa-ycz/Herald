@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from core.pes.base import BasePES
+from core.pes.gene_utils import parse_genes_from_code
 from core.pes.submission import validate_submission_against_sample
 from core.pes.types import PESSolution
 from core.utils.text import extract_summary_excerpt
@@ -69,6 +70,7 @@ class DraftPES(BasePES):
             solution.status = "completed"
             solution.finished_at = utc_now_iso()
             self._archive_completed_solution(solution)
+            self._write_genes(solution)  # 新增
             self._write_l2_knowledge(solution)
             self._emit_task_complete_event(solution=solution, status="completed")
         else:
@@ -755,6 +757,45 @@ class DraftPES(BasePES):
 
         promoted = self._maybe_promote_best(solution=solution, version_dir=version_dir)
         solution.metadata["best_promoted"] = promoted
+
+    def _write_genes(self, solution: PESSolution) -> None:
+        """从 code_snapshots 解析 GENE 标记并写入 genes 表。
+
+        Args:
+            solution: 当前 PESSolution 对象
+        """
+
+        if self.db is None or not hasattr(self.db, "insert_genes"):
+            return
+
+        code = self.db.get_full_code(solution.id)
+        if code is None:
+            logger.warning(
+                "genes 写入跳过：无 code_snapshot [solution_id=%s]", solution.id
+            )
+            return
+
+        genes = parse_genes_from_code(code)
+        if not genes:
+            logger.info(
+                "genes 写入跳过：代码无 GENE 标记 [solution_id=%s]", solution.id
+            )
+            return
+
+        gene_records = [
+            {
+                "slot": slot_name,
+                "description": None,
+                "code_anchor": slot_code[:200],
+            }
+            for slot_name, slot_code in genes.items()
+        ]
+        self.db.insert_genes(solution.id, gene_records)
+        logger.info(
+            "genes 已写入: solution_id=%s, slots=%s",
+            solution.id,
+            sorted(genes.keys()),
+        )
 
     def _archive_successful_solution(self, solution: PESSolution) -> Path | None:
         """将当前 working 工件保存到 history/。"""
