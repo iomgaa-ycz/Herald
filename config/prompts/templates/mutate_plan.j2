@@ -1,0 +1,133 @@
+{{ static_fragments_text | default('', true) }}
+
+{% if time_budget or step_budget %}
+# 资源预算
+
+- 剩余时间: {{ time_budget | default("未知") }}
+- 剩余步骤: {{ step_budget | default("未知") }}
+{% endif %}
+
+# 当前阶段
+
+你当前处于 `mutate_plan` phase，需要选择一个 Gene Slot 进行变异，并为该 Slot 生成新的描述态方案。
+
+{% if agent %}
+# 当前执行 Agent
+
+- `name`: `{{ agent.name }}`
+- `display_name`: `{{ agent.display_name }}`
+
+{% if agent.prompt_text %}
+## Agent 执行偏好
+
+{{ agent.prompt_text }}
+{% endif %}
+{% endif %}
+
+# 角色边界
+
+- `agent` 决定执行风格与问题拆解方式。
+- `task_spec`、`schema`、`parent_solution` 决定任务目标、slot 边界与父方案状态。
+- 若二者冲突，以 `task_spec` / `schema` 为准。
+
+{% if task_spec %}
+# 任务规格
+
+- `task_type`: `{{ task_spec.task_type }}`
+- `competition_name`: `{{ task_spec.competition_name }}`
+- `objective`: `{{ task_spec.objective }}`
+- `metric_name`: `{{ task_spec.metric_name }}`
+- `metric_direction`: `{{ task_spec.metric_direction }}`
+{% endif %}
+
+{% if parent_solution %}
+# 父方案信息
+
+- `solution_id`: `{{ parent_solution.id }}`
+- `generation`: `{{ parent_solution.generation }}`
+- `fitness`: `{{ parent_solution.fitness }}`
+- `status`: `{{ parent_solution.status }}`
+{% if parent_solution.metrics %}
+- `metric_name`: `{{ parent_solution.metrics.metric_name }}`
+- `metric_value`: `{{ parent_solution.metrics.metric_value }}`
+- `metric_direction`: `{{ parent_solution.metrics.metric_direction }}`
+{% endif %}
+
+{% if parent_solution.plan_summary %}
+## 父方案 Plan 摘要
+
+{{ parent_solution.plan_summary }}
+{% endif %}
+
+{% if parent_solution.summarize_insight %}
+## 父方案 Summarize 总结
+
+{{ parent_solution.summarize_insight }}
+{% endif %}
+{% endif %}
+
+{% if mutation_candidates %}
+# Harness 变异候选建议
+
+以下是 Harness 根据规则排序的变异候选 Slot（优先级从高到低）。你可以接受建议，也可以给出理由选择其他 Slot。
+
+{% for candidate in mutation_candidates %}
+- **{{ candidate.slot }}** — 理由: {{ candidate.reason }}{% if candidate.priority %} (优先级: {{ candidate.priority }}){% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if parent_genes %}
+# 父方案 Gene 代码片段
+
+以下是父方案各 Slot 的当前代码（来自 code_snapshots）：
+
+{% for slot_name, slot_code in parent_genes.items() %}
+## Slot `{{ slot_name }}`
+
+```python
+{{ slot_code }}
+```
+
+{% endfor %}
+{% endif %}
+
+{% if allowed_tools is defined %}
+# 当前 phase 可见工具
+
+{% if allowed_tools %}
+- {{ allowed_tools | join(" / ") }}
+{% else %}
+- 当前 phase 无额外工具。
+{% endif %}
+{% endif %}
+
+# 任务要求
+
+1. **选择变异 Slot**：参考 Harness 候选建议和父方案 Summarize 总结，选择一个最值得改进的 Gene Slot
+2. **生成新描述态方案**：为选中的 Slot 生成新的描述态方案，说明变异方向和预期效果
+3. **保持其余 Slot 不变**：明确声明其余 Slot 将从父方案原样继承
+
+## 变异约束
+
+- 每次 mutate 只允许变异一个 Slot
+- 变异方向应与父方案 Summarize 中的建议方向一致（如有）
+- 规划前请先使用 `draft-history-review` skill 查询前序经验，确保变异方向与已有尝试不重复
+
+# 输出格式
+
+请严格按以下结构输出：
+
+## 变异决策
+- 选中 Slot: （Slot 名称）
+- 选择理由: （为什么选这个 Slot）
+- 变异方向: （打算怎么改）
+
+## 新 Slot 方案
+- 目标
+- 核心思路
+- 预期效果
+- 与父方案的差异点
+
+## 继承 Slot
+- 列出所有不变的 Slot 及其继承理由
