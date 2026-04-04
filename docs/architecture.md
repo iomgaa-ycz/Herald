@@ -207,6 +207,15 @@ core/main.py
                 ├── plan:     消费 TaskSpec + data_profile + GenomeSchema 模板
                 ├── execute:  生成真实 solution.py + submission.csv + 提取 metrics
                 └── summarize: 总结 + 版本归档 + best 提升
+
+          └── ✅ Stage 3: emit(TaskDispatchEvent(task_name="mutate", context=上游产出+parent_id))
+                ▼
+              TaskDispatcher → MutatePES.run()
+                ├── plan:     消费 parent 的 genes + summarize + Harness 排序候选
+                │             → LLM 选择 target_slot + 生成新描述态方案
+                ├── execute:  落盘 solution_parent.py → 修改 target_slot 区域
+                │             → 运行、metrics 提取、submission 校验、纯度检查
+                └── summarize: 五小节格式 + L2 写入 + genes 写入
 ```
 
 ### 5.2 FeatureExtractPES.run() 行为
@@ -498,13 +507,18 @@ L2 已接入主流程：Draft Summarize 完成后自动调用 `_write_l2_knowled
 - **Skill 调 CLI 查询**：Agent 已有 Bash 工具，按需查询不膨胀 prompt
 - **L2 = draft summarize 的索引**：每次 run 清 DB，L2 经验全部来自本 run 内前序 draft 的 summarize，不是独立知识源
 
-### 9.3 P1：从多 Draft 进入单谱系进化
+### 9.3 P1：单谱系进化（已完成）
 
-在 P0.7 完成后：
+**已完成：**
+1. `genes` / `code_snapshots` 真正接入主链路（DraftPES Summarize 阶段自动写入 genes 表）
+2. `MutatePES` 闭环（Gene 级变异 + 规则驱动候选排序 + LLM 最终选择）
+3. parent 选择硬编码为 best fitness（Scheduler `_select_best_parent_id()`）
+4. 父代码落盘（`solution_parent.py`）+ 变异纯度检查 Skill
 
-1. 单 `Mutate` 闭环（Mutate 才有 parent，继承代码做局部修改）
-2. 父子 `Solution` 与 slot 级 history 真正接入
-3. 再讨论选择压力、Boltzmann、population summary
+**明确推迟到 M1.5+：**
+- Boltzmann / 锦标赛选择
+- population summary
+- 选择压力可调控
 
 ### 9.4 P2：补全完整研究系统能力
 
@@ -527,7 +541,8 @@ L2 已接入主流程：Draft Summarize 完成后自动调用 `_write_l2_knowled
 | M0.3 | FeatureExtractPES + GenomeSchema 模板 | FeatureExtractPES、task_stages 调度、tabular/generic 模板 | ✅ 完成 |
 | M0.5 | 真实代码落盘、首次执行与事实记录 | tool-write 契约、solution.py、metrics、submission、exec_logs | ✅ 完成 |
 | **M0.7** | **多次 Draft + 差异化生成** | **Summarize 固定格式 ✅、L2 写入 ✅、CLI 查询 ✅（含合并）、draft-history-review Skill、差异化约束** | **← 当前** |
-| M1 | 单谱系进化 | MutatePES、parent/child、genes/snapshots 真接入 | 待开始 |
+| M1 | 单谱系进化 | MutatePES、parent/child、genes/snapshots 真接入 | ✅ 完成 |
+| M1.5 | 选择压力 | Boltzmann 选择、population summary、选择压力可调 | 待开始 |
 | M2 | 完整方案级搜索骨架 | MergePES、L3 回流、schema 驱动搜索 | 待开始 |
 | M3 | 并行与编排 | 多任务调度、预算管理、并行执行 | 待开始 |
 | M4 | 研究级评测 | MLE-bench 全量实验与 ablation | 待开始 |
