@@ -31,8 +31,10 @@ def test_write_genes_calls_insert_genes():
     assert "DATA" in genes
     assert "MODEL" in genes
 
+    summarize_insight = "本轮采用 LightGBM 5-fold，OOF AUC=0.991"
+    shared_desc = summarize_insight[:500]
     gene_records = [
-        {"slot": slot_name, "description": None, "code_anchor": code[:100]}
+        {"slot": slot_name, "description": shared_desc, "code_anchor": code[:100]}
         for slot_name, code in genes.items()
     ]
     mock_db.insert_genes("test-solution-id", gene_records)
@@ -40,6 +42,9 @@ def test_write_genes_calls_insert_genes():
     call_args = mock_db.insert_genes.call_args
     assert call_args[0][0] == "test-solution-id"
     assert len(call_args[0][1]) == 2
+    # description 应为 summarize_insight 截断
+    for rec in call_args[0][1]:
+        assert rec["description"] == shared_desc
 
 
 def test_write_genes_skips_when_no_markers():
