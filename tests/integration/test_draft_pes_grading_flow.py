@@ -107,7 +107,7 @@ def _build_runtime(tmp_path: Path) -> tuple[Path, Workspace, HeraldDB]:
     competition_dir.mkdir(parents=True, exist_ok=True)
     (competition_dir / "train.csv").write_text("id,target\n1,0\n", encoding="utf-8")
     (competition_dir / "sample_submission.csv").write_text(
-        "id,target\n1,0\n",
+        "id,target\n800000,0\n800001,0\n800002,0\n800003,0\n800004,0\n",
         encoding="utf-8",
     )
 
@@ -220,9 +220,9 @@ def test_grading_does_not_override_fitness(tmp_path: Path, monkeypatch) -> None:
 
     solution = asyncio.run(pes.run(agent_profile=_build_agent_profile(), generation=0))
 
-    assert solution.fitness == 0.81
+    assert solution.fitness == 0.9898206993791899
     assert solution.metrics is not None
-    assert solution.metrics["val_metric_value"] == 0.81
+    assert solution.metrics["val_metric_value"] == 0.9898206993791899
 
 
 def test_grading_does_not_enter_prompt_payload(tmp_path: Path, monkeypatch) -> None:

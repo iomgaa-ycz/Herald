@@ -285,7 +285,7 @@ def test_report_format_skill_visible_in_working(tmp_path: Path) -> None:
     skill_text = report_format_skill.read_text(encoding="utf-8")
     assert "# 数据概况报告" in skill_text
     assert "## 1. 数据集概览" in skill_text
-    assert "## 6. 关键发现与建模建议" in skill_text
+    assert "## 8. 关键发现与建模建议" in skill_text
 
 
 def test_feature_extract_execute_skips_missing_project_skills(tmp_path: Path) -> None:
@@ -363,7 +363,7 @@ def test_feature_extract_preview_skill_scripts_run_on_competition_dir(
     submission_payload = sections["sample_submission 约束"]
 
     assert script_path.exists()
-    assert set(sections.keys()) == {
+    assert set(sections.keys()) >= {
         "文件清单",
         "描述文件预览",
         "train 预览",

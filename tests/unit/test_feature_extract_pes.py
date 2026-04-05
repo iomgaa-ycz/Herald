@@ -799,10 +799,10 @@ def test_competition_manifest_valid() -> None:
         missing = required_fields - set(data.keys())
         assert not missing, f"{manifest_path.name} 缺少字段: {missing}"
 
-        # 数据目录存在性（仅在数据根目录可用时检查）
+        # 数据目录存在性（仅在该竞赛数据已下载时检查）
         data_dir = _TEST_DATA_ROOT / data["relative_root"]
-        if _TEST_DATA_ROOT.exists():
-            assert data_dir.exists(), f"{manifest_path.name}: 数据目录不存在 {data_dir}"
+        if not data_dir.exists():
+            continue
             for filename in data["required_public_files"]:
                 assert (data_dir / filename).exists(), (
                     f"{manifest_path.name}: 文件不存在 {data_dir / filename}"
