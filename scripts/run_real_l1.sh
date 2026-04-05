@@ -8,7 +8,7 @@ cd "${PROJECT_ROOT}"
 
 # === 可配置参数（通过环境变量覆盖）===
 COMPETITION_DIR="${HERALD_COMPETITION_DIR:-${HOME}/.cache/mle-bench/data/tabular-playground-series-may-2022}"
-LLM_MODEL="${HERALD_LLM_MODEL:-claude-sonnet-4-6}"
+LLM_MODEL="${HERALD_LLM_MODEL:-glm-5}"
 MAX_TASKS="${HERALD_MAX_TASKS:-3}"
 
 # === 清空 workspace ===

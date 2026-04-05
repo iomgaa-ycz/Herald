@@ -9,7 +9,7 @@ phases:
     tool_names: []
     max_retries: 1
     allowed_tools: ["Bash", "Read", "Glob", "Grep", "Skill"]
-    max_turns: 3
+    max_turns: 16
 
   execute:
     template_name: null
