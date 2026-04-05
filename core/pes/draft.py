@@ -339,8 +339,15 @@ class DraftPES(BasePES):
         }
 
     def _extract_val_metrics_from_stdout(self, stdout: str) -> dict[str, Any] | None:
-        """从 stdout 中抽取指标。"""
+        """从 stdout 中抽取指标。
 
+        支持三种格式：
+        1. 单行 JSON: {"metric_value": 0.99, ...}
+        2. 多行 JSON: { \\n  "metric_value": 0.99, \\n ... }
+        3. 正则 fallback: metric_value: 0.99 或 "metric_value": 0.99
+        """
+
+        # Phase 1: 单行 JSON
         for line in stdout.splitlines():
             text = line.strip()
             if not text:
@@ -354,18 +361,49 @@ class DraftPES(BasePES):
                 if metrics is not None:
                     return metrics
 
+        # Phase 2: 多行 JSON（收集 { ... } 块）
+        brace_depth = 0
+        json_lines: list[str] = []
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            if brace_depth == 0 and stripped.startswith("{"):
+                brace_depth = stripped.count("{") - stripped.count("}")
+                json_lines = [stripped]
+                if brace_depth <= 0:
+                    # 单行闭合，已在 Phase 1 处理过
+                    brace_depth = 0
+                    json_lines = []
+            elif brace_depth > 0:
+                json_lines.append(stripped)
+                brace_depth += stripped.count("{") - stripped.count("}")
+                if brace_depth <= 0:
+                    blob = " ".join(json_lines)
+                    brace_depth = 0
+                    json_lines = []
+                    try:
+                        payload = json.loads(blob)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(payload, dict):
+                        metrics = self._extract_val_metrics_from_structured_payload(
+                            payload
+                        )
+                        if metrics is not None:
+                            return metrics
+
+        # Phase 3: 正则 fallback（兼容 JSON 引号格式和朴素 key=value 格式）
         patterns = {
             "val_metric_name": [
-                r"val_metric_name\s*[:=]\s*([A-Za-z0-9_./-]+)",
-                r"metric_name\s*[:=]\s*([A-Za-z0-9_./-]+)",
+                r'"?val_metric_name"?\s*[:=]\s*"?([A-Za-z0-9_./-]+)"?',
+                r'"?metric_name"?\s*[:=]\s*"?([A-Za-z0-9_./-]+)"?',
             ],
             "val_metric_value": [
-                r"val_metric_value\s*[:=]\s*([-+]?\d+(?:\.\d+)?)",
-                r"metric_value\s*[:=]\s*([-+]?\d+(?:\.\d+)?)",
+                r'"?val_metric_value"?\s*[:=]\s*([-+]?\d+(?:\.\d+)?)',
+                r'"?metric_value"?\s*[:=]\s*([-+]?\d+(?:\.\d+)?)',
             ],
             "val_metric_direction": [
-                r"val_metric_direction\s*[:=]\s*(maximize|max|minimize|min)",
-                r"metric_direction\s*[:=]\s*(maximize|max|minimize|min)",
+                r'"?val_metric_direction"?\s*[:=]\s*"?(maximize|max|minimize|min)"?',
+                r'"?metric_direction"?\s*[:=]\s*"?(maximize|max|minimize|min)"?',
             ],
         }
 
@@ -782,10 +820,11 @@ class DraftPES(BasePES):
             )
             return
 
+        shared_desc = (solution.summarize_insight or "")[:500]
         gene_records = [
             {
                 "slot": slot_name,
-                "description": None,
+                "description": shared_desc or None,
                 "code_anchor": slot_code[:200],
             }
             for slot_name, slot_code in genes.items()
