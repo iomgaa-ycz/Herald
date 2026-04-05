@@ -58,6 +58,7 @@ class SolutionRepository(BaseRepository):
         execute_summary: str | None = None,
         summarize_insight: str | None = None,
         finished_at: str | None = None,
+        mutated_slot: str | None = None,
     ) -> None:
         updates = ["status = ?"]
         params: list[Any] = [status]
@@ -83,6 +84,9 @@ class SolutionRepository(BaseRepository):
         if finished_at is not None:
             updates.append("finished_at = ?")
             params.append(finished_at)
+        if mutated_slot is not None:
+            updates.append("mutated_slot = ?")
+            params.append(mutated_slot)
 
         params.append(solution_id)
 

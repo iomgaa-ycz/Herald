@@ -222,7 +222,13 @@ class MutatePES(DraftPES):
         if phase == "plan":
             solution.plan_summary = response_text
             target_slot = self._parse_target_slot(response_text)
+            if target_slot is None:
+                raise RuntimeError(
+                    "MutatePES plan 未能解析 target_slot，终止保留现场。"
+                    f"\nplan 原文前 500 字符:\n{response_text[:500]}"
+                )
             solution.target_slot = target_slot
+            self._persist_mutated_slot(solution)
             if parent_solution is not None:
                 self._place_parent_code(parent_solution.id)
             return {
@@ -254,6 +260,7 @@ class MutatePES(DraftPES):
         """从 plan 输出中解析选中的变异 Slot。
 
         优先匹配 "选中 Slot: XXX" 格式，降级匹配 GENE:XXX 格式。
+        预处理去除 markdown 标记（**、*、`）以兼容 LLM 输出格式差异。
 
         Args:
             plan_text: plan 阶段的响应文本
@@ -262,15 +269,18 @@ class MutatePES(DraftPES):
             slot 名称（大写），无法解析时返回 None
         """
 
+        # 去除 markdown 格式标记，避免 **bold** / `code` 干扰正则
+        cleaned = re.sub(r"[*`]", "", plan_text)
+
         match = re.search(
-            r"选中\s*Slot\s*[:：]\s*[`]?(\w+)[`]?",
-            plan_text,
+            r"选中\s*Slot\s*[:：]\s*(\w+)",
+            cleaned,
             re.IGNORECASE,
         )
         if match is not None:
             return match.group(1).upper()
 
-        match = re.search(r"GENE[:\s_]*(\w+)", plan_text, re.IGNORECASE)
+        match = re.search(r"GENE[:\s_]*(\w+)", cleaned, re.IGNORECASE)
         if match is not None:
             slot = match.group(1).upper()
             if slot not in ("START", "END"):
@@ -278,6 +288,21 @@ class MutatePES(DraftPES):
 
         logger.warning("未能从 plan 输出中解析 target_slot")
         return None
+
+    def _persist_mutated_slot(self, solution: PESSolution) -> None:
+        """plan 阶段解析出 target_slot 后回填 DB。
+
+        Args:
+            solution: 当前 PESSolution 对象
+        """
+
+        if self.db is None or not hasattr(self.db, "update_solution_status"):
+            return
+        self.db.update_solution_status(
+            solution_id=solution.id,
+            status=solution.status,
+            mutated_slot=solution.target_slot,
+        )
 
     def _place_parent_code(self, parent_id: str) -> None:
         """将父代码落盘到 workspace/working/solution_parent.py。

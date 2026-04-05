@@ -80,6 +80,7 @@ class HeraldDB:
         execute_summary: str | None = None,
         summarize_insight: str | None = None,
         finished_at: str | None = None,
+        mutated_slot: str | None = None,
     ) -> None:
         with self.transaction():
             self.solutions.update_status(
@@ -92,6 +93,7 @@ class HeraldDB:
                 execute_summary=execute_summary,
                 summarize_insight=summarize_insight,
                 finished_at=finished_at,
+                mutated_slot=mutated_slot,
             )
 
     def get_solution(self, solution_id: str) -> dict | None:
