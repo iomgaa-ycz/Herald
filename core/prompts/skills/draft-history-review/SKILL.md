@@ -27,8 +27,10 @@ description: >-
 通过 Bash 调用 `get-l2-insights` 获取本次 run 内前序 draft 的经验摘要：
 
 ```bash
-python core/cli/db.py get-l2-insights --task-type <task_type> --db-path <db_path>
+python core/cli/db.py get-l2-insights --task-type <task_type> --db-path $HERALD_DB_PATH
 ```
+
+> `$HERALD_DB_PATH` 环境变量已由 Harness 注入，直接使用即可，**禁止自行猜测数据库路径**。
 
 可选参数：
 - `--run-id <run_id>` — 按 run 过滤（通常不需要，因为每次 run 前会清 DB）
@@ -55,7 +57,7 @@ python core/cli/db.py get-l2-insights --task-type <task_type> --db-path <db_path
 如果某个前序 draft 的策略值得深入了解（如 fitness 特别高或失败原因不明），调用 `get-draft-detail`：
 
 ```bash
-python core/cli/db.py get-draft-detail --solution-id <source_solution_id> --db-path <db_path>
+python core/cli/db.py get-draft-detail --solution-id <source_solution_id> --db-path $HERALD_DB_PATH
 ```
 
 返回该 draft 的完整 `summarize_insight`（含五小节：摘要、策略选择、执行结果、关键发现、建议方向）。
