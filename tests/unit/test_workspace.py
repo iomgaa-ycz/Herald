@@ -75,6 +75,54 @@ def test_promote_best_updates_best_dir(tmp_path: Path) -> None:
     }
 
 
+def test_save_version_archives_and_clears_run_log(tmp_path: Path) -> None:
+    """save_version 应将 run.log 拷贝到 history 并清空 working 下的 run.log。"""
+
+    workspace = _build_workspace(tmp_path)
+
+    # 模拟 execute 阶段写入 run.log
+    workspace.run_log_path.write_text(
+        '{"metric_name": "auc", "metric_value": 0.95}\n',
+        encoding="utf-8",
+    )
+
+    version_dir = workspace.save_version(
+        code="print('v1')\n",
+        submission="id,target\n1,0.5\n",
+        generation=1,
+        solution_id="sol-runlog-test",
+    )
+
+    # run.log 应被归档到 history
+    archived_log = version_dir / "run.log"
+    assert archived_log.exists()
+    assert "metric_value" in archived_log.read_text(encoding="utf-8")
+
+    # working/run.log 应被清空
+    assert workspace.run_log_path.exists()
+    assert workspace.run_log_path.read_text(encoding="utf-8") == ""
+
+
+def test_save_version_skips_run_log_when_absent(tmp_path: Path) -> None:
+    """run.log 不存在时 save_version 不应报错。"""
+
+    workspace = _build_workspace(tmp_path)
+
+    # 确保 run.log 不存在
+    if workspace.run_log_path.exists():
+        workspace.run_log_path.unlink()
+
+    version_dir = workspace.save_version(
+        code="print('v2')\n",
+        submission="id,target\n1,0.6\n",
+        generation=2,
+        solution_id="sol-nolog-test",
+    )
+
+    assert version_dir.exists()
+    assert not (version_dir / "run.log").exists()
+
+
 def test_read_best_metadata_returns_none_when_absent(tmp_path: Path) -> None:
     """best metadata 不存在时返回 None。"""
 

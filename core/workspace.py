@@ -145,6 +145,12 @@ class Workspace:
 
         (version_dir / "solution.py").write_text(code, encoding="utf-8")
         (version_dir / "submission.csv").write_text(submission, encoding="utf-8")
+
+        # 归档 run.log 并清空，避免下轮 fitness 提取读到历史数据
+        if self.run_log_path.exists() and self.run_log_path.stat().st_size > 0:
+            (version_dir / "run.log").write_bytes(self.run_log_path.read_bytes())
+            self.run_log_path.write_text("", encoding="utf-8")
+
         return version_dir
 
     def promote_best(
